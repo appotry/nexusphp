@@ -8,12 +8,13 @@ use App\Models\Category;
 use App\Models\Icon;
 use App\Models\NexusModel;
 use App\Models\SearchBox;
+use App\Models\Torrent;
 use App\Repositories\SearchBoxRepository;
 use Filament\Facades\Filament;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
@@ -23,13 +24,13 @@ class CategoryResource extends Resource
 {
     protected static ?string $model = Category::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-collection';
+    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
     protected static ?string $navigationGroup = 'Section';
 
     protected static ?int $navigationSort = 2;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.category');
     }
@@ -46,7 +47,19 @@ class CategoryResource extends Resource
                 Forms\Components\Select::make('mode')
                     ->options(SearchBox::listModeOptions())
                     ->label(__('label.search_box.label'))
-                    ->required()
+                    ->rules([
+                        'required',
+                        function () {
+                            return function ($attribute, $value, $fail) {
+                                //@todo how to get the editing record ?
+                                $exists = Torrent::query()->where('category', $value)->exists();
+                                do_log("check $attribute: $value torrent if exists: $exists");
+//                                if ($exists) {
+//                                    $fail("There are torrents belonging to this category that cannot be changed!");
+//                                }
+                            };
+                        }
+                    ])
                 ,
                 Forms\Components\TextInput::make('name')->required()->label(__('label.search_box.taxonomy.name'))->required(),
                 Forms\Components\TextInput::make('image')
@@ -65,8 +78,8 @@ class CategoryResource extends Resource
                 ,
                 Forms\Components\TextInput::make('sort_index')
                     ->default(0)
-                    ->label(__('label.search_box.taxonomy.sort_index'))
-                    ->helperText(__('label.search_box.taxonomy.sort_index_help'))
+                    ->label(__('label.priority'))
+                    ->helperText(__('label.priority_help'))
                 ,
 
             ]);
@@ -84,7 +97,7 @@ class CategoryResource extends Resource
                 Tables\Columns\TextColumn::make('class_name')->label(__('label.search_box.taxonomy.class_name')),
                 Tables\Columns\TextColumn::make('sort_index')->label(__('label.search_box.taxonomy.sort_index'))->sortable(),
             ])
-            ->defaultSort('sort_index', 'asc')
+            ->defaultSort('sort_index', 'desc')
             ->filters([
                 Tables\Filters\SelectFilter::make('mode')
                     ->options(SearchBox::query()->pluck('name', 'id')->toArray())

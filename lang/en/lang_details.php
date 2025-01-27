@@ -122,7 +122,7 @@ $lang_details = array
 	'text_hide_list' => "[Hide list]",
 	'row_action' => "Action",
 	'text_download_torrent' => "Download torrent",
-    'text_download_paid_torrent' => "Download torrent(deduct bonus: %s)",
+    'text_download_paid_torrent' => "Download torrent(announce will deduct bonus: %s)",
     'text_download_bought_torrent' => "Download torrent(bought)",
 	'title_download_torrent' => "Download&nbsp;torrent",
 	'text_ask_for_reseed' => "Ask for a reseed",
@@ -241,6 +241,7 @@ $lang_details = array
     'claim_confirm' => 'Are you sure to claim this torrent?',
     'action_approval' => 'Approval',
     'row_tags' => 'Tags',
+    'torrent_existed' => 'Torrent already uploaded!',
 );
 
 ?>

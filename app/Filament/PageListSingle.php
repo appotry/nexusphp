@@ -13,13 +13,11 @@ class PageListSingle extends ManageRecords
 
     protected function getTableFiltersLayout(): ?string
     {
-        return Layout::AboveContent;
+        return \Filament\Tables\Enums\FiltersLayout::AboveContent;
     }
 
-    protected function getTableRecordUrlUsing(): ?Closure
+    protected function getTableRecordActionUsing(): ?Closure
     {
-        return function (Model $record): ?string {
-            return null;
-        };
+        return null;
     }
 }

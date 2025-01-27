@@ -14,14 +14,14 @@ class Cleanup extends Command
      *
      * @var string
      */
-    protected $signature = 'cleanup {--action=} {--begin_id=} {--end_id=} {--request_id=}';
+    protected $signature = 'cleanup {--action=} {--begin_id=} {--id_str=} {--end_id=} {--request_id=} {--delay=} {--id_redis_key=}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Cleanup async job trigger, options: --begin_id, --end_id, --request_id, --action (seed_bonus, seeding_leeching_time, seeders_etc)';
+    protected $description = 'Cleanup async job trigger, options: --begin_id, --end_id, --id_str, --request_id, --delay, --id_redis_key,--action (seed_bonus, seeding_leeching_time, seeders_etc)';
 
     /**
      * Execute the console command.
@@ -33,14 +33,17 @@ class Cleanup extends Command
         $action = $this->option('action');
         $beginId = $this->option('begin_id');
         $endId = $this->option('end_id');
+        $idStr = $this->option('id_str') ?: "";
+        $idRedisKey = $this->option('id_redis_key') ?: "";
         $commentRequestId = $this->option('request_id');
-        $this->info("beginId: $beginId, endId: $endId, commentRequestId: $commentRequestId, action: $action");
+        $delay = intval($this->option('delay') ?: 0);
+        $this->info("beginId: $beginId, endId: $endId, idStr: $idStr, idRedisKey: $idRedisKey, commentRequestId: $commentRequestId, delay: $delay, action: $action");
         if ($action == 'seed_bonus') {
-            CalculateUserSeedBonus::dispatch($beginId, $endId, $commentRequestId);
+            CalculateUserSeedBonus::dispatch($beginId, $endId, $idStr, $idRedisKey, $commentRequestId)->delay($delay);
         } elseif ($action == 'seeding_leeching_time') {
-            UpdateUserSeedingLeechingTime::dispatch($beginId, $endId, $commentRequestId);
+            UpdateUserSeedingLeechingTime::dispatch($beginId, $endId, $idStr, $idRedisKey, $commentRequestId)->delay($delay);
         }elseif ($action == 'seeders_etc') {
-            UpdateTorrentSeedersEtc::dispatch($beginId, $endId, $commentRequestId);
+            UpdateTorrentSeedersEtc::dispatch($beginId, $endId, $idStr, $idRedisKey, $commentRequestId)->delay($delay);
         } else {
             $msg = "[$commentRequestId], Invalid action: $action";
             do_log($msg, 'error');

@@ -2,6 +2,14 @@
 require_once("../include/bittorrent.php");
 dbconn();
 require_once(get_langfile_path());
+loggedinorreturn();
+$id = $CURUSER['id'];
+$lockName = sprintf("takeinvite:%s", $id);
+$lock = new \Nexus\Database\NexusLock($lockName, 10);
+if (!$lock->get()) {
+    $errMsg = nexus_trans("nexus.do_not_repeat");
+    stderr($errMsg, $errMsg);
+}
 registration_check('invitesystem', true, false);
 $userRep = new \App\Repositories\UserRepository();
 try {
@@ -15,10 +23,12 @@ function bark($msg) {
   stdfoot();
   exit;
 }
-
-$id = $CURUSER['id'];
 $email = unesc(htmlspecialchars(trim($_POST["email"])));
 $email = safe_email($email);
+$preRegisterUsername = $_POST['pre_register_username'] ?? '';
+$isPreRegisterEmailAndUsername = get_setting("system.is_invite_pre_email_and_username") == "yes";
+if (strlen($preRegisterUsername) > 12)
+	bark($lang_takeinvite['std_username_too_long']);
 if (!$email)
     bark($lang_takeinvite['std_must_enter_email']);
 if (!check_email($email))
@@ -32,6 +42,19 @@ if(!EmailAllowed($email))
 $body = str_replace("<br />", "<br />", nl2br(trim(strip_tags($_POST["body"]))));
 if(!$body)
 	bark($lang_takeinvite['std_must_enter_personal_message']);
+
+if ($isPreRegisterEmailAndUsername) {
+    if (empty($preRegisterUsername)) {
+        bark(nexus_trans("invite.require_pre_register_username"));
+    }
+    if (!validusername($preRegisterUsername)) {
+        bark(nexus_trans("user.username_invalid", ["username" => $preRegisterUsername]));
+    }
+    $exists = \App\Models\User::query()->where('username', $preRegisterUsername)->exists();
+    if ($exists) {
+        bark(nexus_trans("user.username_already_exists", ["username" => $preRegisterUsername]));
+    }
+}
 
 
 // check if email addy is already in use
@@ -80,17 +103,33 @@ $sendResult = sent_mail($email,$SITENAME,$SITEEMAIL,$title,$message,"invitesignu
 //this email is sent only when someone give out an invitation
 if ($sendResult === true) {
     if (isset($hashRecord)) {
-        $hashRecord->update([
+        $update = [
             'invitee' => $email,
             'time_invited' => now(),
             'valid' => 1,
-        ]);
+        ];
+        if ($isPreRegisterEmailAndUsername) {
+            $update["pre_register_email"] = $email;
+            $update["pre_register_username"] = $preRegisterUsername;
+        }
+        $hashRecord->update($update);
     } else {
-        sql_query("INSERT INTO invites (inviter, invitee, hash, time_invited) VALUES ('".mysql_real_escape_string($id)."', '".mysql_real_escape_string($email)."', '".mysql_real_escape_string($hash)."', " . sqlesc(date("Y-m-d H:i:s")) . ")");
+        $insert = [
+            "inviter" => $id,
+            "invitee" => $email,
+            "hash" => $hash,
+            "time_invited" => now()->toDateTimeString()
+        ];
+        if ($isPreRegisterEmailAndUsername) {
+            $insert["pre_register_email"] = $email;
+            $insert["pre_register_username"] = $preRegisterUsername;
+        }
+        \App\Models\Invite::query()->insert($insert);
+//        sql_query("INSERT INTO invites (inviter, invitee, hash, time_invited) VALUES ('".mysql_real_escape_string($id)."', '".mysql_real_escape_string($email)."', '".mysql_real_escape_string($hash)."', " . sqlesc(date("Y-m-d H:i:s")) . ")");
         sql_query("UPDATE users SET invites = invites - 1 WHERE id = ".mysql_real_escape_string($id)) or sqlerr(__FILE__, __LINE__);
     }
 }
-
+$lock->release();
 header("Refresh: 0; url=invite.php?id=".htmlspecialchars($id)."&sent=1");
 ?>
 

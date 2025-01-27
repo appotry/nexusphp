@@ -5,17 +5,21 @@ namespace App\Filament\Resources\User;
 use App\Filament\Resources\User\HitAndRunResource\Pages;
 use App\Filament\Resources\User\HitAndRunResource\RelationManagers;
 use App\Models\HitAndRun;
+use App\Models\User;
 use App\Repositories\HitAndRunRepository;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
+use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\HtmlString;
+use Filament\Infolists\Components;
+use Filament\Infolists;
 
 class HitAndRunResource extends Resource
 {
@@ -27,7 +31,7 @@ class HitAndRunResource extends Resource
 
     protected static ?int $navigationSort = 3;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.hit_and_runs');
     }
@@ -56,6 +60,7 @@ class HitAndRunResource extends Resource
                 Tables\Columns\TextColumn::make('seedTimeRequired')->label(__('label.seed_time_required')),
                 Tables\Columns\TextColumn::make('inspectTimeLeft')->label(__('label.inspect_time_left')),
                 Tables\Columns\TextColumn::make('statusText')->label(__('label.status')),
+                Tables\Columns\TextColumn::make('created_at')->label(__('label.created_at')),
             ])
             ->defaultSort('id', 'desc')
             ->filters([
@@ -74,7 +79,7 @@ class HitAndRunResource extends Resource
             ->actions([
                 Tables\Actions\ViewAction::make(),
             ])
-            ->prependBulkActions([
+            ->groupedBulkActions([
                 Tables\Actions\BulkAction::make('Pardon')->action(function (Collection $records) {
                     $idArr = $records->pluck('id')->toArray();
                     $rep = new HitAndRunRepository();
@@ -82,8 +87,53 @@ class HitAndRunResource extends Resource
                 })
                 ->deselectRecordsAfterCompletion()
                 ->label(__('admin.resources.hit_and_run.bulk_action_pardon'))
-                    ->icon('heroicon-o-x')
+                    ->icon('heroicon-o-x-mark')
             ]);
+    }
+
+    public static function infolist(Infolist $infolist): Infolist
+    {
+        return $infolist
+            ->schema([
+                Infolists\Components\TextEntry::make('id'),
+                Infolists\Components\TextEntry::make('statusText')
+                    ->label(__("label.status"))
+                ,
+                Infolists\Components\TextEntry::make('uid')
+                    ->formatStateUsing(fn ($record) => username_for_admin($record->uid))
+                    ->label(__("label.username"))
+                ,
+                Infolists\Components\TextEntry::make('torrent_id')
+                    ->formatStateUsing(fn ($record) => $record->torrent->name)
+                    ->label(__("label.torrent.label"))
+                ,
+                Infolists\Components\TextEntry::make('snatch.uploadedText')
+                    ->label(__("label.uploaded"))
+                ,
+                Infolists\Components\TextEntry::make('snatch.downloadedText')
+                    ->label(__("label.downloaded"))
+                ,
+                Infolists\Components\TextEntry::make('snatch.shareRatio')
+                    ->label(__("label.ratio"))
+                ,
+                Infolists\Components\TextEntry::make('seedTimeRequired')
+                    ->label(__("label.seed_time_required"))
+                ,
+                Infolists\Components\TextEntry::make('inspectTimeLeft')
+                    ->label(__("label.inspect_time_left"))
+                ,
+                Infolists\Components\TextEntry::make('comment')
+                    ->formatStateUsing(fn ($record) => nl2br($record->comment))
+                    ->label(__("label.comment"))
+                ,
+                Infolists\Components\TextEntry::make('created_at')
+                    ->label(__("label.created_at"))
+                ,
+                Infolists\Components\TextEntry::make('updated_at')
+                    ->label(__("label.updated_at"))
+                ,
+                ])->columns(4);
+
     }
 
     public static function getEloquentQuery(): Builder

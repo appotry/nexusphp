@@ -11,6 +11,7 @@ use Illuminate\Validation\UnauthorizedException;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
+use Laravel\Passport\Exceptions\AuthenticationException as PassportAuthenticationException;
 
 class Handler extends ExceptionHandler
 {
@@ -41,12 +42,19 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
+        if (app()->runningInConsole()) {
+            return;
+        }
         $this->reportable(function (InsufficientPermissionException $e) {
             if (request()->expectsJson()) {
                 return response()->json(fail($e->getMessage(), request()->all()), 403);
             } else {
                 return abort(403);
             }
+        });
+        $this->renderable(function (PassportAuthenticationException $e) {
+            $request = request();
+            return response()->redirectTo(sprintf("%s/login.php?returnto=%s", $request->getSchemeAndHttpHost(), urlencode($request->fullUrl())));
         });
 
         //Other Only handle in json request
@@ -55,7 +63,7 @@ class Handler extends ExceptionHandler
         }
 
         $this->renderable(function (AuthenticationException $e) {
-            return response()->json(fail($e->getMessage(), $e->guards()), 401);
+            return response()->json(fail($e->getMessage(), ['guards' => $e->guards()]), 401);
         });
 
         $this->renderable(function (UnauthorizedException $e) {
@@ -71,7 +79,8 @@ class Handler extends ExceptionHandler
         $this->renderable(function (NotFoundHttpException $e) {
             if ($e->getPrevious() && $e->getPrevious() instanceof ModelNotFoundException) {
                 $exception = $e->getPrevious();
-                return response()->json(fail($exception->getMessage(), request()->all()), 404);
+                do_log(sprintf("NotFoundHttpException: %s, trace: %s", $exception->getMessage(), $exception->getTraceAsString()), 'error');
+                return response()->json(fail($exception->getMessage(), request()->all()));
             }
         });
     }

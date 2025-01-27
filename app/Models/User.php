@@ -137,7 +137,12 @@ class User extends Authenticatable implements FilamentUser, HasName
         return $result;
     }
 
-    public function canAccessFilament(): bool
+    public static function exists($id): bool
+    {
+        return self::query()->where("id", $id)->exists();
+    }
+
+    public function canAccessPanel(\Filament\Panel $panel): bool
     {
         return $this->canAccessAdmin();
     }
@@ -177,9 +182,10 @@ class User extends Authenticatable implements FilamentUser, HasName
      * @var array
      */
     protected $fillable = [
-        'username', 'email', 'passhash', 'secret', 'stylesheet', 'editsecret', 'added', 'modcomment', 'enabled', 'status',
+        'username', 'email', 'passhash', 'secret', 'stylesheet', 'editsecret', 'added', 'enabled', 'status',
         'leechwarn', 'leechwarnuntil', 'page', 'class', 'uploaded', 'downloaded', 'clientselect', 'showclienterror', 'last_home',
-        'seedbonus', 'bonuscomment', 'downloadpos', 'vip_added', 'vip_until', 'title', 'invites', 'attendance_card',
+        'seedbonus', 'downloadpos', 'vip_added', 'vip_until', 'title', 'invites', 'attendance_card',
+        'seed_points_per_hour', 'passkey',
     ];
 
     /**
@@ -188,7 +194,7 @@ class User extends Authenticatable implements FilamentUser, HasName
      * @var array
      */
     protected $hidden = [
-        'secret', 'passhash',
+        'secret', 'passhash', 'passkey'
     ];
 
     /**
@@ -218,11 +224,13 @@ class User extends Authenticatable implements FilamentUser, HasName
         'leechwarnuntil' => 'datetime',
     ];
 
-    public static $commonFields = [
-        'id', 'username', 'email', 'class', 'status', 'added', 'avatar',
+    public static array $commonFields = [
+        'id', 'username', 'email', 'class', 'status', 'added', 'avatar', 'passkey',
         'uploaded', 'downloaded', 'seedbonus', 'seedtime', 'leechtime',
         'invited_by', 'enabled', 'seed_points', 'last_access', 'invites',
         'lang', 'attendance_card', 'privacy', 'noad', 'downloadpos', 'donoruntil', 'donor',
+        'downloadpos', 'vip_added', 'vip_until', 'title', 'invites', 'attendance_card',
+        'seed_points_per_hour'
     ];
 
     public static function getDefaultUserAttributes(): array
@@ -323,6 +331,11 @@ class User extends Authenticatable implements FilamentUser, HasName
         return new Attribute(
             get: fn($value, $attributes) => nexus_trans('user.genders.' . $attributes['gender'])
         );
+    }
+
+    protected function getTwoFactorAuthenticationStatusAttribute(): string
+    {
+        return $this->two_step_secret != "" ? "yes" : "no";
     }
 
     public static function getMinSeedPoints($class)
@@ -512,6 +525,21 @@ class User extends Authenticatable implements FilamentUser, HasName
         return $this->hasMany(UserPermission::class, 'uid');
     }
 
+    public function examAndTasks(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Exam::class, "exam_users", "uid", "exam_id");
+    }
+
+    public function onGoingExamAndTasks(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->examAndTasks()->wherePivot("status", ExamUser::STATUS_NORMAL);
+    }
+
+    public function modifyLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(UserModifyLog::class, "user_id");
+    }
+
     public function getAvatarAttribute($value)
     {
         if ($value) {
@@ -537,20 +565,32 @@ class User extends Authenticatable implements FilamentUser, HasName
             throw new \RuntimeException('This method only works when user exists !');
         }
         //@todo how to do prepare bindings here ?
-        $comment = addslashes($comment);
-        do_log("update: " . json_encode($update) . ", $commentField: $comment", 'notice');
-        $update[$commentField] = NexusDB::raw("if($commentField = '', '$comment', concat_ws('\n', '$comment', $commentField))");
-        return $this->update($update);
+//        $comment = addslashes($comment);
+//        do_log("update: " . json_encode($update) . ", $commentField: $comment", 'notice');
+//        $update[$commentField] = NexusDB::raw("if($commentField = '', '$comment', concat_ws('\n', '$comment', $commentField))");
+
+        if ($commentField != "modcomment") {
+            throw new \RuntimeException("unsupported commentField: $commentField !");
+        }
+        return NexusDB::transaction(function () use ($update, $comment) {
+            $this->modifyLogs()->create(['content' => $comment]);
+            return $this->update($update);
+        });
     }
 
     public function canAccessAdmin(): bool
     {
-        $targetClass = self::CLASS_ADMINISTRATOR;
+        $targetClass = self::getAccessAdminClassMin();
         if (!$this->class || $this->class < $targetClass) {
             do_log(sprintf('user: %s, no class or class < %s, can not access admin.', $this->id, $targetClass));
             return false;
         }
         return true;
+    }
+
+    public static function getAccessAdminClassMin()
+    {
+        return Setting::get("system.access_admin_class_min") ?: User::CLASS_ADMINISTRATOR;
     }
 
     public function isDonating(): bool

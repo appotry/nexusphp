@@ -6,6 +6,8 @@ cur_user_check ();
 require_once(get_langfile_path("",true));
 require_once(get_langfile_path("", false, get_langfolder_cookie()));
 
+$isPreRegisterEmailAndUsername = get_setting("system.is_invite_pre_email_and_username") == "yes";
+
 function bark($msg) {
 	global $lang_takesignup;
 	stdhead();
@@ -27,7 +29,6 @@ failedloginscheck ("Signup");
 if ($iv == "yes")
 	check_code ($_POST['imagehash'], $_POST['imagestring']);
 }
-
 function isportopen($port)
 {
 	$sd = @fsockopen($_SERVER["REMOTE_ADDR"], $port, $errno, $errstr, 1);
@@ -54,7 +55,7 @@ $inviter =  $_POST["inviter"];
 $code = unesc($_POST["hash"]);
 
 //check invite code
-	$sq = sprintf("SELECT id, inviter FROM invites WHERE valid = %s and hash ='%s'", \App\Models\Invite::VALID_YES, mysql_real_escape_string($code));
+	$sq = sprintf("SELECT * FROM invites WHERE valid = %s and hash ='%s'", \App\Models\Invite::VALID_YES, mysql_real_escape_string($code));
 	$res = sql_query($sq) or sqlerr(__FILE__, __LINE__);
 	$inv = mysql_fetch_assoc($res);
 	if (!$inv)
@@ -72,10 +73,13 @@ $res = sql_query("SELECT username FROM users WHERE id = $inviter") or sqlerr(__F
 $arr = mysql_fetch_assoc($res);
 $invusername = $arr['username'];
 }
-
-if (!mkglobal("wantusername:wantpassword:passagain:email"))
-	die();
-
+if (!mkglobal("wantusername:wantpassword:passagain:email")) {
+    die();
+}
+if ($isPreRegisterEmailAndUsername && $type == 'invite' && !empty($inv["pre_register_username"]) && !empty($inv["pre_register_email"])) {
+    $wantusername = $inv["pre_register_username"];
+    $email = $inv["pre_register_email"];
+}
 $email = htmlspecialchars(trim($email));
 $email = safe_email($email);
 if (!check_email($email))
@@ -147,6 +151,7 @@ $secret = mksecret();
 $wantpasshash = md5($secret . $wantpassword . $secret);
 $editsecret = ($verification == 'admin' ? '' : $secret);
 $invite_count = (int) $invite_count;
+$passkey = md5($wantusername.date("Y-m-d H:i:s").$wantpasshash);
 
 $wantusername = sqlesc($wantusername);
 $wantpasshash = sqlesc($wantpasshash);
@@ -163,8 +168,9 @@ $res_check_user = sql_query("SELECT * FROM users WHERE username = " . $wantusern
 if(mysql_num_rows($res_check_user) == 1)
   bark($lang_takesignup['std_username_exists']);
 
-$ret = sql_query("INSERT INTO users (username, passhash, secret, editsecret, email, country, gender, status, class, invites, ".($type == 'invite' ? "invited_by," : "")." added, last_access, lang, stylesheet".($showschool == 'yes' ? ", school" : "").", uploaded) VALUES (" . $wantusername . "," . $wantpasshash . "," . $secret . "," . $editsecret . "," . $email . "," . $country . "," . $gender . ", 'pending', ".$defaultclass_class.",". $invite_count .", ".($type == 'invite' ? "'$inviter'," : "") ." '". date("Y-m-d H:i:s") ."' , " . " '". date("Y-m-d H:i:s") ."' , ".$sitelangid . ",".$defcss.($showschool == 'yes' ? ",".$school : "").",".($iniupload_main > 0 ? $iniupload_main : 0).")") or sqlerr(__FILE__, __LINE__);
+$ret = sql_query("INSERT INTO users (username, passhash, passkey, secret, editsecret, email, country, gender, status, class, invites, ".($type == 'invite' ? "invited_by," : "")." added, last_access, lang, stylesheet".($showschool == 'yes' ? ", school" : "").", uploaded) VALUES (" . $wantusername . "," . $wantpasshash . "," . sqlesc($passkey) . "," . $secret . "," . $editsecret . "," . $email . "," . $country . "," . $gender . ", 'pending', ".$defaultclass_class.",". $invite_count .", ".($type == 'invite' ? "'$inviter'," : "") ." '". date("Y-m-d H:i:s") ."' , " . " '". date("Y-m-d H:i:s") ."' , ".$sitelangid . ",".$defcss.($showschool == 'yes' ? ",".$school : "").",".($iniupload_main > 0 ? $iniupload_main : 0).")") or sqlerr(__FILE__, __LINE__);
 $id = mysql_insert_id();
+fire_event("user_created", \App\Models\User::query()->find($id, \App\Models\User::$commonFields));
 $tmpInviteCount = get_setting('main.tmp_invite_count');
 if ($tmpInviteCount > 0) {
     $userRep = new \App\Repositories\UserRepository();

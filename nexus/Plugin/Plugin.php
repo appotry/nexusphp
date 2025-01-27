@@ -5,7 +5,14 @@ class Plugin
 {
     private static mixed $providers = null;
 
-    public function __construct()
+    private static array $plugins = [];
+
+//    public function __construct()
+//    {
+//        $this->start();
+//    }
+
+    public function start(): void
     {
         $this->loadProviders();
         $this->bootPlugins();
@@ -14,6 +21,21 @@ class Plugin
     public static function enabled($name): bool
     {
         return !empty(self::$providers[$name]['providers']);
+    }
+
+    public static function listEnabled(): array
+    {
+        $result = [];
+        //plugins are more exactly
+        foreach (self::$plugins as $id => $plugin) {
+            $result[$id] = 1;
+        }
+        return $result;
+    }
+
+    public static function getById($id) :BasePlugin|null
+    {
+        return self::$plugins[$id] ?? null;
     }
 
     public function getMainClass($name)
@@ -29,7 +51,10 @@ class Plugin
 
     private function bootPlugins()
     {
-        foreach (self::$providers as $name => $providers) {
+        foreach (self::$providers as $providers) {
+            if (!isset($providers['providers'])) {
+                continue;
+            }
             $provider = $providers['providers'][0];
             $parts = explode('\\', $provider);
             if ($parts[0] == 'NexusPlugin') {
@@ -39,7 +64,12 @@ class Plugin
                     if (defined($constantName) && version_compare(VERSION_NUMBER, constant($constantName), '<')) {
                         continue;
                     }
-                    call_user_func([new $className, 'boot']);
+                    $plugin = new $className;
+                    $pluginIdName = "$className::ID";
+                    if (defined($pluginIdName)) {
+                        self::$plugins[constant($pluginIdName)] = $plugin;
+                    }
+                    call_user_func([$plugin, 'boot']);
                 }
             }
         }
@@ -56,6 +86,8 @@ class Plugin
             }
         }
     }
+
+
 
 
 }

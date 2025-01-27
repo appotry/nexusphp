@@ -37,13 +37,15 @@ Route::group(['middleware' => ['auth:sanctum', 'locale']], function () {
         Route::get('search-box', [\App\Http\Controllers\TorrentController::class, 'searchBox']);
         Route::resource('news', \App\Http\Controllers\NewsController::class);
         Route::get('attend', [\App\Http\Controllers\AttendanceController::class, 'attend']);
-        Route::resource('news', \App\Http\Controllers\NewsController::class);
         Route::get('news-latest', [\App\Http\Controllers\NewsController::class, 'latest']);
         Route::resource('polls', \App\Http\Controllers\PollController::class);
         Route::get('polls-latest', [\App\Http\Controllers\PollController::class, 'latest']);
         Route::post('polls-vote', [\App\Http\Controllers\PollController::class, 'vote']);
         Route::resource('rewards', \App\Http\Controllers\RewardController::class);
         Route::get('notifications', [\App\Http\Controllers\ToolController::class, 'notifications']);
+        Route::resource('over-forums', \App\Http\Controllers\OverForumController::class);
+        Route::resource('forums', \App\Http\Controllers\ForumController::class);
+        Route::resource('topics', \App\Http\Controllers\TopicController::class);
     });
 
     Route::group(['middleware' => ['admin']], function () {
@@ -93,3 +95,8 @@ Route::group(['middleware' => ['auth:sanctum', 'locale']], function () {
 });
 
 Route::post('login', [\App\Http\Controllers\AuthenticateController::class, 'login']);
+
+
+Route::group(['middleware' => ['auth.nexus:passkey', 'locale']], function () {
+    Route::post("pieces-hash", [\App\Http\Controllers\TorrentController::class, "queryByPiecesHash"])->name("torrent.pieces_hash.query");
+});

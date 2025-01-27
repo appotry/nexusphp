@@ -1,6 +1,7 @@
 <?php
 namespace App\Repositories;
 
+use App\Http\Middleware\Locale;
 use App\Models\Invite;
 use App\Models\Message;
 use App\Models\News;
@@ -39,7 +40,7 @@ class ToolRepository extends BaseRepository
                 $command .= " --exclude=$dirName/$item";
             }
             $command .= sprintf(
-                ' -czf %s -C %s %s',
+                ' -czf %s -C %s %s 2>&1',
                 $filename, dirname($webRoot), $dirName
             );
             $result = exec($command, $output, $result_code);
@@ -90,7 +91,7 @@ class ToolRepository extends BaseRepository
         $config = config("database.connections.$connectionName");
         $filename = sprintf('%s/%s.database.%s.sql', sys_get_temp_dir(), basename(base_path()), date('Ymd.His'));
         $command = sprintf(
-            'mysqldump --user=%s --password=%s --host=%s --port=%s --single-transaction --no-create-db --databases %s >> %s',
+            'mysqldump --user=%s --password=%s --host=%s --port=%s --single-transaction --no-create-db %s >> %s 2>&1',
             $config['username'], $config['password'], $config['host'], $config['port'], $config['database'], $filename,
         );
         $result = exec($command, $output, $result_code);
@@ -118,7 +119,7 @@ class ToolRepository extends BaseRepository
         if (command_exists('tar') && ($method === 'tar' || $method === null)) {
             $filename = $baseFilename . ".tar.gz";
             $command = sprintf(
-                'tar -czf %s -C %s %s -C %s %s',
+                'tar -czf %s -C %s %s -C %s %s 2>&1',
                 $filename,
                 dirname($backupWeb['filename']), basename($backupWeb['filename']),
                 dirname($backupDatabase['filename']), basename($backupDatabase['filename'])
@@ -299,7 +300,7 @@ class ToolRepository extends BaseRepository
         $start = Carbon::now();
         try {
             $remoteFilesystem->writeStream(basename($filename), $localFilesystem->readStream($filename));
-            $speed = !(float)$start->diffInSeconds() ? 0 :filesize($filename) / (float)$start->diffInSeconds();
+            $speed = !(float)abs($start->diffInSeconds()) ? 0 :filesize($filename) / (float)abs($start->diffInSeconds());
             $log =  'Elapsed time: '.$start->diffForHumans(null, true);
             $log .= ', Speed: '. number_format($speed/1024,2) . ' KB/s';
             do_log($log);
@@ -316,7 +317,7 @@ class ToolRepository extends BaseRepository
      * @param $body
      * @return bool
      */
-    public function sendMail($to, $subject, $body): bool
+    public function sendMail($to, $subject, $body, $exception = false): bool
     {
         $log = "[SEND_MAIL]";
         $factory = new EsmtpTransportFactory();
@@ -328,7 +329,8 @@ class ToolRepository extends BaseRepository
         }
         // Create the Transport
         $transport = $factory->create(new Dsn(
-            $encryption === 'tls' ? (($smtp['smtpport'] == 465) ? 'smtps' : 'smtp') : '',
+//            $encryption === 'tls' ? (($smtp['smtpport'] == 465) ? 'smtps' : 'smtp') : '',
+            $smtp['smtpport'] == 465 && in_array($encryption, ['ssl', 'tls']) ? 'smtps' : 'smtp',
             $smtp['smtpaddress'],
             $smtp['accountname'] ?? null,
             $smtp['accountpassword'] ?? null,
@@ -341,7 +343,7 @@ class ToolRepository extends BaseRepository
 
         // Create a message
         $message = (new Email())
-            ->from(new Address($smtp['accountname'], Setting::get('basic.SITENAME')))
+            ->from(new Address(Setting::get('main.SITEEMAIL'), Setting::get('basic.SITENAME')))
             ->to($to)
             ->subject($subject)
             ->html($body)
@@ -353,7 +355,11 @@ class ToolRepository extends BaseRepository
             return true;
         } catch (\Throwable $e) {
             do_log("$log, fail: " . $e->getMessage() . "\n" . $e->getTraceAsString(), 'error');
-            return false;
+            if ($exception) {
+                throw $e;
+            } else {
+                return false;
+            }
         }
     }
 
@@ -438,5 +444,86 @@ class ToolRepository extends BaseRepository
         }
         return $this->generateUniqueInviteHash($hashArr, $total, $total - count($hashArr), ++$deep);
 
+    }
+
+    public function removeDuplicateSnatch()
+    {
+        $size = 2000;
+        $stickyPromotionParticipatorsTable = 'sticky_promotion_participators';
+        $claimTable = "claims";
+        $hitAndRunTable = "hit_and_runs";
+        $stickyPromotionExists = NexusDB::hasTable($stickyPromotionParticipatorsTable);
+        $claimTableExists = NexusDB::hasTable($claimTable);
+        $hitAndRunTableExists = NexusDB::hasTable($hitAndRunTable);
+        while (true) {
+            $snatchRes = NexusDB::select("select userid, torrentid, group_concat(id) as ids from snatched group by userid, torrentid having(count(*)) > 1 limit $size");
+            if (empty($snatchRes)) {
+                break;
+            }
+            do_log("[DELETE_DUPLICATED_SNATCH], count: " . count($snatchRes));
+            foreach ($snatchRes as $snatchRow) {
+                $torrentId = $snatchRow['torrentid'];
+                $userId = $snatchRow['userid'];
+                $idArr = explode(',', $snatchRow['ids']);
+                sort($idArr, SORT_NUMERIC);
+                $remainId = array_pop($idArr);
+                $delIdStr = implode(',', $idArr);
+                do_log("[DELETE_DUPLICATED_SNATCH], torrent: $torrentId, user: $userId, snatchIdStr: $delIdStr");
+                NexusDB::statement("delete from snatched where id in ($delIdStr)");
+                if ($claimTableExists) {
+                    NexusDB::statement("update $claimTable set snatched_id = $remainId where torrent_id = $torrentId and uid = $userId");
+                }
+                if ($hitAndRunTableExists) {
+                    NexusDB::statement("update $hitAndRunTable set snatched_id = $remainId where torrent_id = $torrentId and uid = $userId");
+                }
+                if ($stickyPromotionExists) {
+                    NexusDB::statement("update $stickyPromotionParticipatorsTable set snatched_id = $remainId where torrent_id = $torrentId and uid = $userId");
+                }
+            }
+        }
+    }
+
+    public function removeDuplicatePeer()
+    {
+        $size = 2000;
+        while (true) {
+            $results = NexusDB::select("select torrent, userid, group_concat(id) as ids from peers group by torrent, peer_id, userid having(count(*)) > 1 limit $size");
+            if (empty($results)) {
+                do_log("[DELETE_DUPLICATED_PEERS], no data: ". last_query());
+                break;
+            }
+            do_log("[DELETE_DUPLICATED_PEERS], count: " . count($results));
+            foreach ($results as $row) {
+                $torrentId = $row['torrent'];
+                $userId = $row['userid'];
+                $idArr = explode(',', $row['ids']);
+                sort($idArr, SORT_NUMERIC);
+                $remainId = array_pop($idArr);
+                $delIdStr = implode(',', $idArr);
+                do_log("[DELETE_DUPLICATED_PEERS], torrent: $torrentId, user: $userId, snatchIdStr: $delIdStr");
+                NexusDB::statement("delete from peers where id in ($delIdStr)");
+            }
+        }
+    }
+
+    public function sendAlarmEmail(string $subjectTransKey, array $subjectTransContext, string $msgTransKey, array $msgTransContext): void
+    {
+        $receiverUid = get_setting("system.alarm_email_receiver");
+        if (empty($receiverUid)) {
+            $locale = Locale::getDefault();
+            $subject = nexus_trans($subjectTransKey, $subjectTransContext, $locale);
+            $msg = nexus_trans($msgTransKey, $msgTransContext, $locale);
+            do_log(sprintf("%s - %s", $subject, $msg), "error");
+        } else {
+            $receiverUidArr = preg_split("/[\r\n\s,，]+/", $receiverUid);
+            $users = User::query()->whereIn("id", $receiverUidArr)->get(User::$commonFields);
+            foreach ($users as $user) {
+                $locale = $user->locale;
+                $subject = nexus_trans($subjectTransKey, $subjectTransContext, $locale);
+                $msg = nexus_trans($msgTransKey, $msgTransContext, $locale);
+                $result = $this->sendMail($user->email, $subject, $msg);
+                do_log(sprintf("send msg: %s result: %s", $msg, var_export($result, true)), $result ? "info" : "error");
+            }
+        }
     }
 }

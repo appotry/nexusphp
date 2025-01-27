@@ -22,9 +22,12 @@ use App\Repositories\ExamRepository;
 use App\Repositories\SearchBoxRepository;
 use App\Repositories\TagRepository;
 use App\Repositories\ToolRepository;
+use App\Repositories\TorrentRepository;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Nexus\Database\NexusDB;
 
@@ -89,6 +92,7 @@ class Update extends Install
 
     public function runExtraQueries()
     {
+        $toolRep = new ToolRepository();
         /**
          * @since 1.7.13
          */
@@ -273,6 +277,9 @@ class Update extends Install
         }
         $this->doLog("$searchBoxLog, shouldMigrateSearchBox: $shouldMigrateSearchBox");
         if ($shouldMigrateSearchBox) {
+            $this->runMigrate('database/migrations/2021_06_08_113437_create_searchbox_table.php');
+            $this->runMigrate('database/migrations/2022_03_08_041951_add_custom_fields_to_searchbox_table.php');
+            $this->runMigrate('database/migrations/2022_09_02_031539_add_extra_to_searchbox_table.php');
             $this->runMigrate('database/migrations/2022_09_05_230532_add_mode_to_section_related.php');
             $this->runMigrate('database/migrations/2022_09_06_004318_add_section_name_to_searchbox_table.php');
             $this->runMigrate('database/migrations/2022_09_06_030324_change_searchbox_field_extra_to_json.php');
@@ -289,6 +296,52 @@ class Update extends Install
             }
         }
 
+        if (!$this->isSnatchedTableTorrentUserUnique()) {
+            $toolRep->removeDuplicateSnatch();
+            $this->runMigrate('database/migrations/2023_03_29_021950_handle_snatched_user_torrent_unique.php');
+            $this->doLog("removeDuplicateSnatch and migrate 2023_03_29_021950_handle_snatched_user_torrent_unique");
+        }
+
+        if (!NexusDB::hasIndex("peers", "unique_torrent_peer_user")) {
+            $toolRep->removeDuplicatePeer();
+            $this->runMigrate('database/migrations/2023_04_01_005409_add_unique_torrent_peer_user_to_peers_table.php');
+            $this->doLog("removeDuplicatePeer and migrate 2023_04_01_005409_add_unique_torrent_peer_user_to_peers_table");
+        }
+
+        /**
+         * @since 1.8.3
+         */
+        $hasTableSetting = NexusDB::hasTable('settings');
+        if ($hasTableSetting) {
+            $updateSettings = [];
+            if (get_setting("system.meilisearch_enabled") == 'yes') {
+                $updateSettings["enabled"] = "yes";
+            }
+            if (get_setting("system.meilisearch_search_description") == 'yes') {
+                $updateSettings["search_description"] = "yes";
+            }
+            if (!empty($updateSettings)) {
+                $this->saveSettings(['meilisearch' => $updateSettings]);
+            }
+        }
+
+        /**
+         * @since 1.8.10
+         */
+        if ($hasTableSetting) {
+            Setting::query()->firstOrCreate(
+                ["name" => "system.alarm_email_receiver"],
+                ["value" => User::query()->where("class", User::CLASS_STAFF_LEADER)->first(["id"])->id]
+            );
+        }
+
+        /**
+         * @since 1.9.0
+         */
+        if (!Schema::hasTable("torrent_extras")) {
+            $this->runMigrate("database/migrations/2025_01_08_133552_create_torrent_extra_table.php");
+            Artisan::call("upgrade:migrate_torrents_table_text_column");
+        }
     }
 
     public function runExtraMigrate()
@@ -479,6 +532,41 @@ class Update extends Install
             Tag::query()->firstOrCreate($attributes, $values);
             $priority--;
         }
+    }
+
+    private function isSnatchedTableTorrentUserUnique(): bool
+    {
+        $tableName = 'snatched';
+        $result = NexusDB::select('show index from ' . $tableName);
+        foreach ($result as $item) {
+            if (in_array($item['Column_name'], ['torrentid', 'userid']) && $item['Non_unique'] == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function updateEnvFile()
+    {
+        $envFile = ROOT_PATH . '.env';
+        $envExample = ROOT_PATH . '.env.example';
+        $envData = readEnvFile($envFile);
+        $envExampleData = readEnvFile($envExample);
+        foreach ($envExampleData as $key => $value) {
+            if (!isset($envData[$key])) {
+                $envData[$key] = $value;
+            }
+        }
+        $fp = @fopen($envFile, 'w');
+        if ($fp === false) {
+            throw new \RuntimeException("can't create env file, make sure php has permission to create file at: " . ROOT_PATH);
+        }
+        $content = "";
+        foreach ($envData as $key => $value) {
+            $content .= "{$key}={$value}\n";
+        }
+        fwrite($fp, $content);
+        fclose($fp);
     }
 
 

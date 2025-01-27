@@ -2,7 +2,6 @@
 namespace Nexus\Plugin;
 
 use App\Repositories\BaseRepository;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Artisan;
 
 abstract class BasePlugin extends BaseRepository
@@ -35,5 +34,27 @@ abstract class BasePlugin extends BaseRepository
                 VERSION_NUMBER, constant($constantName)
             ));
         }
+    }
+
+    public function getNexusView($name): string
+    {
+        $reflection = new \ReflectionClass(get_called_class());
+        $pluginRoot = dirname($reflection->getFileName(), 2);
+        return $pluginRoot . "/resources/views/" . trim($name, "/");
+    }
+
+    public function trans($name): string
+    {
+        return nexus_trans($this->getTransKey($name));
+    }
+
+    public function getTransKey($name): string
+    {
+        return sprintf("%s::%s", static::ID, $name);
+    }
+
+    public static function getInstance(): static
+    {
+        return Plugin::getById(static::ID);
     }
 }

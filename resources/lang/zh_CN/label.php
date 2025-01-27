@@ -40,6 +40,8 @@ return [
     'city' => '城市',
     'client' => '客户端',
     'reason' => '原因',
+    'change' => '修改',
+    'create' => '创建',
     'setting' => [
         'nav_text' => '设置',
         'backup' => [
@@ -72,6 +74,8 @@ return [
             'ignore_when_ratio_reach_help' => '达标的最小分享率',
             'ban_user_when_counts_reach' => 'H&R 数量上限',
             'ban_user_when_counts_reach_help' => 'H&R 数量达到此值，账号会被禁用',
+            'include_rate' => '计入完成率',
+            'include_rate_help' => '当下载完成率（0 ~ 1 之间的小数）达到此值时才计入 H&R。默认：1'
         ],
         'seed_box' => [
             'tab_header' => 'SeedBox',
@@ -85,6 +89,15 @@ return [
             'max_uploaded_duration' => '最大上传量倍数有效时间范围',
             'max_uploaded_duration_help' => '单位：小时。种子发布后的这个时间范围内，最大上传量倍数生效，超过此范围不生效。设置为 0 一直生效',
         ],
+        'meilisearch' => [
+            'tab_header' => 'Meilisearch',
+            'enabled' => '是否启用 Meilisearch',
+            'enabled_help' => '请先安装配置好并导入数据再启用，否则种子搜索无数据',
+            'search_description' => '是否搜索描述',
+            'search_description_help' => "默认：'否'。若为'是'，描述中包含关键字也会返回，命中的结果可能较多。修改后需立即重新导入",
+            'default_search_mode' => '默认搜索模式',
+            'default_search_mode_help' => "默认：'准确'。'与'将进行分词，'准确'不分词",
+        ],
         'system' => [
             'tab_header' => '系统',
             'change_username_card_allow_characters_outside_the_alphabets' => '改名卡是否允许英文字母外的字符',
@@ -92,8 +105,22 @@ return [
             'maximum_number_of_medals_can_be_worn' => '勋章最大可佩戴数',
             'cookie_valid_days' => 'Cookie 有效天数',
             'maximum_upload_speed' => '最大上传速度',
-            'maximum_upload_speed_help' => '单种上传速度超过此值账号即刻禁用，单位 Mbps。如：100 Mbps = 12.5 MB/s',
+            'maximum_upload_speed_help' => '此值影响作弊者检测，是检测级别保守的最大上传速度。实际限速 = 最大上传速度/检测级别，从保守~多疑为1~4。假如最大限速为 1000，检测级别为保守，实际限速为 1000/1 = 1000，检测级别为多疑，实际限速为 1000/4=250。单种上传速度超过实际限速即刻禁用账号。这里的单位是 Mbps，如：100 Mbps = 12.5 MB/s。',
+            'is_invite_pre_email_and_username' => '邀请是否预定邮箱和用户名',
+            'is_invite_pre_email_and_username_help' => "默认: 'No'。若预定，用户注册时不可修改邮箱和用户名",
+            'access_admin_class_min' => '登录管理后台最小等级',
+            'access_admin_class_min_help' => '默认：管理员，用户等级大于等于设定值的用户可以登录管理后台',
+            'alarm_email_receiver' => '告警邮件接收者',
+            'alarm_email_receiver_help' => '填写用户 UID，多个空格隔开，系统异常告警邮件将会发到对应用户的邮箱。如果不填会写到运行日志中，日志级别为 error',
         ],
+        'image_hosting' => [
+            'driver' => '存储位置',
+            'driver_help' => '若选择 local, 对应默认的保存在网站所在服务器本地, 否则上传到对应的图片服务器',
+            'tab_header' => '图床',
+            'upload_api_endpoint' => '上传接口地址',
+            'base_url' => '图片 URL 前缀',
+            'upload_token' => '上传令牌',
+        ]
     ],
     'user' => [
         'label' => '用户',
@@ -128,12 +155,16 @@ return [
         'label' => '用户勋章',
     ],
     'exam' => [
-        'label' => '考核',
+        'label' => '考核 & 任务',
         'is_done' => '是否完成',
         'is_discovered' => '自动发现',
         'register_time_range' => [
             'begin' => '注册时间开始',
             'end' => '注册时间结束',
+        ],
+        'register_days_range' => [
+            'begin' => '注册天数最少',
+            'end' => '注册天数最多',
         ],
         'donated' => '是否捐赠',
         'index_formatted' => '考核指标',
@@ -182,6 +213,7 @@ return [
         'size_end' => '体积小于',
         'price' => '价格',
         'price_help' => '用户下载种子时，发布者将获得收入，但要扣除相应税率，当前税率：:tax_factor',
+        'max_price_help' => '允许最大值：:max_price',
     ],
     'hit_and_run' => [
         'label' => '用户 H&R',
@@ -201,7 +233,7 @@ return [
         'label' => '允许客户端',
         'family' => '系列',
         'start_name' => '起始名称',
-        'peer_id_start' => 'Peer ID 超始',
+        'peer_id_start' => 'Peer ID 起始',
         'peer_id_pattern' => 'Peer ID 正则',
         'peer_id_matchtype' => 'Peer ID 匹配类型',
         'peer_id_match_num' => 'Peer ID 匹配次数',
@@ -243,10 +275,11 @@ return [
         'ip' => 'IP(段)',
         'ip_begin' => '起始 IP',
         'ip_end' => '结束 IP',
-        'ip_help' => '填写起始 IP + 结束 IP，或 IP(段)，不要同时填写',
+        'ip_help' => '填写 ASN/起始 IP + 结束 IP/IP(段)，不要同时填写',
         'status' => '状态',
         'is_allowed' => '是否白名单',
         'is_allowed_help' => '位于白名单中的 IP 不受 SeedBox 规则影响',
+        'asn' => 'ASN',
     ],
     'menu' => [
         'label' => '自定义菜单',

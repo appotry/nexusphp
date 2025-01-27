@@ -4,13 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\ExamResource;
 use App\Http\Resources\UserResource;
+use App\Models\LoginLog;
 use App\Models\Setting;
 use App\Models\User;
 use App\Repositories\AuthenticateRepository;
+use App\Repositories\UserRepository;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
+use Illuminate\Validation\Rule;
 
 class AuthenticateController extends Controller
 {
@@ -61,6 +64,8 @@ class AuthenticateController extends Controller
                 logincookie($user->id, $passhash,false, get_setting('system.cookie_valid_days', 365) * 86400, true, true, true);
                 $user->last_login = now();
                 $user->save();
+                $userRep = new UserRepository();
+                $userRep->saveLoginLog($user->id, $ip, 'Passkey', false);
             }
         }
         return redirect('index.php');
@@ -71,10 +76,31 @@ class AuthenticateController extends Controller
         $request->validate([
             'data' => 'required|string'
         ]);
-        $user = $this->repository->nasToolsApprove($request->data);
-        $resource = new UserResource($user);
-        return $this->success($resource);
+        try {
+            $user = $this->repository->nasToolsApprove($request->data);
+            $resource = new UserResource($user);
+            return $this->success($resource);
+        } catch (\Exception $exception) {
+            $msg = $exception->getMessage();
+            $params = $request->all();
+            do_log(sprintf("nasToolsApprove fail: %s, params: %s", $msg, nexus_json_encode($params)));
+            return $this->fail($params, $msg);
+        }
     }
 
-
+    public function iyuuApprove(Request $request)
+    {
+        try {
+            $request->validate([
+                'token' => 'required|string',
+                'id' => 'required|integer',
+                'verity' => 'required|string',
+                'provider' => ["required", "string", Rule::in("iyuu")],
+            ]);
+            $this->repository->iyuuApprove($request->token, $request->id, $request->verity);
+            return response()->json(["success" => true]);
+        } catch (\Exception $exception) {
+            return response()->json(["success" => false, "msg" => $exception->getMessage()]);
+        }
+    }
 }

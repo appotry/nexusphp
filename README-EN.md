@@ -2,6 +2,8 @@ English | [中文](/)
 
 Complete PT website building solution. Based on NexusPHP + Laravel + Filament.
 
+Welcome to participate in internationalization work, click [here](https://github.com/xiaomlove/nexusphp/discussions/193) for more information
+
 ## Functional Features
 
 - Upload torrent
@@ -17,6 +19,7 @@ Complete PT website building solution. Based on NexusPHP + Laravel + Filament.
 - Medal
 - Props  
 - Custom tags 
+- Third-party full-text search
 - SeedBox rule  
 - Forum
 - Complain  
@@ -35,10 +38,12 @@ Complete PT website building solution. Based on NexusPHP + Laravel + Filament.
 - Lucky draw
 - Custom role permission
 - Section H&R
+- TGBot
 ## System Requirements
-- PHP: 8.0, must have extensions: bcmath, ctype, curl, fileinfo, json, mbstring, openssl, pdo_mysql, tokenizer, xml, mysqli, gd, redis, pcntl, sockets, posix, gmp, zend opcache
+- PHP: 8.0|8.1|8.2, must have extensions: bcmath, ctype, curl, fileinfo, json, mbstring, openssl, pdo_mysql, tokenizer, xml, mysqli, gd, redis, pcntl, sockets, posix, gmp, zend opcache
 - Mysql: 5.7 latest version or above
 - Redis：2.6.12 or above
+- Others: supervisor, rsync
 
 ## Quick Start
 Install docker.  

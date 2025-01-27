@@ -11,6 +11,8 @@ return [
         'invitee_register_email' => '注册用户邮箱',
         'invitee_register_username' => '注册用户名',
         'expired_at' => 'hash 过期时间',
+        'time_invited_begin' => '发邀时间大于',
+        'time_invited_end' => '发邀时间小于',
     ],
     'send_deny_reasons' => [
         'invite_system_closed' => '邀请系统已关闭',
@@ -18,4 +20,7 @@ return [
         'invite_not_enough' => '邀请数量不足',
     ],
     'send_allow_text' => '邀请其他人',
+    'pre_register_username' => '预注册用户名',
+    'pre_register_username_help' => '用户使用此邀请码注册时用户名和邮箱将不能更改',
+    'require_pre_register_username' => '预注册用户名不能为空',
 ];

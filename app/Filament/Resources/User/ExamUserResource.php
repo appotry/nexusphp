@@ -8,10 +8,11 @@ use App\Models\Exam;
 use App\Models\ExamUser;
 use App\Repositories\ExamRepository;
 use App\Repositories\HitAndRunRepository;
+use Carbon\Carbon;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
@@ -29,7 +30,7 @@ class ExamUserResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.exam_users');
     }
@@ -59,6 +60,7 @@ class ExamUserResource extends Resource
                     ->formatStateUsing(fn ($record) => new HtmlString(get_username($record->uid, false, true, true, true)))
                 ,
                 Tables\Columns\TextColumn::make('exam.name')->label(__('label.exam.label')),
+                Tables\Columns\TextColumn::make('exam.typeText')->label(__('exam.type')),
                 Tables\Columns\TextColumn::make('begin')->label(__('label.begin'))->dateTime(),
                 Tables\Columns\TextColumn::make('end')->label(__('label.end'))->dateTime(),
                 Tables\Columns\BooleanColumn::make('is_done')->label(__('label.exam_user.is_done')),
@@ -77,9 +79,20 @@ class ExamUserResource extends Resource
                         return $query->when($data['uid'], fn (Builder $query, $uid) => $query->where("uid", $uid));
                     })
                 ,
+                Tables\Filters\SelectFilter::make('exam_type')
+                    ->options(Exam::listTypeOptions())
+                    ->label(__('exam.type'))
+                    ->query(function (Builder $query, array $data) {
+                        $query->when($data['value'], function (Builder $query) use ($data) {
+                            $query->whereHas("exam", function (Builder $query) use ($data) {
+                                $query->where("type", $data['value']);
+                            });
+                        });
+                    })
+                ,
                 Tables\Filters\SelectFilter::make('exam_id')
                     ->options(Exam::query()->pluck('name', 'id')->toArray())
-                    ->label(__('exam.label'))
+                    ->label(__('label.exam.label'))
                 ,
                 Tables\Filters\SelectFilter::make('status')->options(ExamUser::listStatus(true))->label(__("label.status")),
                 Tables\Filters\SelectFilter::make('is_done')->options(['0' => 'No', '1' => 'yes'])->label(__('label.exam_user.is_done')),
@@ -87,15 +100,41 @@ class ExamUserResource extends Resource
             ->actions([
                 Tables\Actions\ViewAction::make(),
             ])
-            ->prependBulkActions([
+            ->groupedBulkActions([
                 Tables\Actions\BulkAction::make('Avoid')->action(function (Collection $records) {
                     $idArr = $records->pluck('id')->toArray();
                     $rep = new ExamRepository();
                     $rep->avoidExamUserBulk(['id' => $idArr], Auth::user());
                 })
                 ->deselectRecordsAfterCompletion()
+                ->requiresConfirmation()
                 ->label(__('admin.resources.exam_user.bulk_action_avoid_label'))
-                ->icon('heroicon-o-x')
+                ->icon('heroicon-o-x-mark'),
+
+                Tables\Actions\BulkAction::make('UpdateEnd')
+                    ->form([
+                        Forms\Components\DateTimePicker::make('end')
+                            ->required()
+                            ->label(__('label.end'))
+                        ,
+                        Forms\Components\Textarea::make('reason')
+                            ->label(__('label.reason'))
+                        ,
+                    ])
+                    ->action(function (Collection $records, array $data) {
+                        $end = Carbon::parse($data['end']);
+                        $rep = new ExamRepository();
+                        foreach ($records as $record) {
+                            if ($end->isAfter($record->begin)) {
+                                $rep->updateExamUserEnd($record, $end, $data['reason'] ?? '');
+                            } else {
+                                do_log(sprintf("examUser: %d end: %s is before begin: %s, skip", $record->id, $end, $record->begin));
+                            }
+                        }
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->label(__('admin.resources.exam_user.bulk_action_update_end_label'))
+                    ->icon('heroicon-o-pencil'),
             ]);
     }
 

@@ -40,6 +40,7 @@ return [
     'city' => 'City',
     'client' => 'Client',
     'reason' => 'Reason',
+    'change' => 'Change',
     'setting' => [
         'nav_text' => 'Setting',
         'backup' => [
@@ -72,6 +73,8 @@ return [
             'ignore_when_ratio_reach_help' => 'The minimum sharing rate to meet the standard',
             'ban_user_when_counts_reach' => 'H&R counts limit',
             'ban_user_when_counts_reach_help' => 'The number of H&R reaches this value and the account will be disabled',
+            'include_rate' => 'Require completion rate',
+            'include_rate_help' => 'Count H&R only when the download completion rate (decimal between 0 ~ 1) reaches this value. Default: 1'
         ],
         'seed_box' => [
             'tab_header' => 'SeedBox',
@@ -85,6 +88,15 @@ return [
             'max_uploaded_duration' => 'Maximum upload volume multiplier effective time range',
             'max_uploaded_duration_help' => 'Unit: hours. The maximum upload volume multiplier takes effect within this time range after the torrent is published, and does not take effect beyond this range. A setting of 0 is always in effect',
         ],
+        'meilisearch' => [
+            'tab_header' => 'Meilisearch',
+            'enabled' => 'Whether to enable Meilisearch',
+            'enabled_help' => 'Please install and configure it and import the data before enabling it, otherwise there is no data for torrent search.',
+            'search_description' => 'Meilisearch whether to search for descriptions',
+            'search_description_help' => "Default: 'No'. If 'Yes', description containing keywords will also be returned, and the number of hits may be higher. Need to re-import immediately after change",
+            'default_search_mode' => 'Default search mode',
+            'default_search_mode_help' => "Default: 'Exact'. 'And' will be split, 'Exact' is not split",
+        ],
         'system' => [
             'tab_header' => 'System',
             'change_username_card_allow_characters_outside_the_alphabets' => 'Does the name change card allow characters other than English letters',
@@ -92,8 +104,22 @@ return [
             'maximum_number_of_medals_can_be_worn' => 'Maximum number of medals that can be worn',
             'cookie_valid_days' => 'Cookie Valid days',
             'maximum_upload_speed' => 'Maximum upload speed',
-            'maximum_upload_speed_help' => 'A single torrent upload speed exceeding this value is instantly disabled for the account, in Mbps. For example: 100 Mbps = 12.5 MB/s',
+            'maximum_upload_speed_help' => 'This value affects cheater detection and is the maximum upload speed for a conservative detection level. Actual Speed Limit = Maximum Upload Speed / Detection Level, from Conservative to Suspicious is 1 to 4. If the Maximum Speed Limit is 1000, and the Detection Level is Conservative, the Actual Speed Limit is 1000/1 = 1000, and the Detection Level is Suspicious, the Actual Speed Limit is 1000/4 = 250. A single upload speed that exceeds the Actual Speed Limit will instantly disable the account. The unit here is Mbps, e.g.: 100 Mbps = 12.5 MB/s.',
+            'is_invite_pre_email_and_username' => 'Invite whether to pre-book an email and username',
+            'is_invite_pre_email_and_username_help' => "Default: 'No'. If pre-booked, email and username may not be changed when the user registers.",
+            'access_admin_class_min' => 'Minimum class for logging into admin backend',
+            'access_admin_class_min_help' => 'Default: administrator, users with a user class greater than or equal to the set value can log into the admin backend',
+            'alarm_email_receiver' => 'Alarm email receiver',
+            'alarm_email_receiver_help' => "Fill in the UID of the user, separated by space, and the alarm email will be sent to the corresponding user's email address. If you don't fill it in, it will be written to the runtime log, and the log level will be error",
         ],
+        'image_hosting' => [
+            'driver' => 'Storage location',
+            'driver_help' => 'If you choose local, the default is to save it locally on the server where the website is located, otherwise upload it to the corresponding image server',
+            'tab_header' => 'Image hosting',
+            'upload_api_endpoint' => 'Upload interface address',
+            'base_url' => 'Image URL prefix',
+            'upload_token' => 'Upload token',
+        ]
     ],
     'user' => [
         'label' => 'User',
@@ -126,12 +152,16 @@ return [
         'label' => 'User medal',
     ],
     'exam' => [
-        'label' => 'Exam',
+        'label' => 'Exam & Task',
         'is_done' => 'Is done',
         'is_discovered' => 'Discovered',
         'register_time_range' => [
             'begin' => 'Register time begin',
             'end' => 'Register time end',
+        ],
+        'register_days_range' => [
+            'begin' => 'Minimum days registered',
+            'end' => 'Maximum days registered',
         ],
         'donated' => 'Donated',
         'index_formatted' => 'Exam indexes',
@@ -180,6 +210,7 @@ return [
         'size_end' => 'Size less than',
         'price' => 'Price',
         'price_help' => 'When a user downloads a torrent, the uploader will receive revenue, less the corresponding tax rate, the current tax rate: :tax_factor',
+        'max_price_help' => 'Maximum::max_price',
     ],
     'hit_and_run' => [
         'label' => 'User H&R',
@@ -237,10 +268,11 @@ return [
         'ip' => 'IP(Block)',
         'ip_begin' => 'Begin IP',
         'ip_end' => 'End IP',
-        'ip_help' => 'Fill in the begin IP + end IP, or IP (Block), not both',
+        'ip_help' => 'Fill in the ASN/begin IP + end IP/IP (Block), only one of the three',
         'status' => 'Status',
         'is_allowed' => 'Is whitelisted',
         'is_allowed_help' => 'IPs in the whitelist are not affected by the SeedBox rule',
+        'asn' => 'ASN',
     ],
     'menu' => [
         'label' => 'Custom menu',

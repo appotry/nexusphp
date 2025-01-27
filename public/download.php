@@ -9,7 +9,7 @@ function denyDownload()
 }
 $torrentRep = new \App\Repositories\TorrentRepository();
 if (!empty($_REQUEST['downhash'])) {
-    $params = explode('|', $_REQUEST['downhash']);
+    $params = explode('.', $_REQUEST['downhash'], 2);
     if (empty($params[0]) || empty($params[1])) {
         die("invalid downhash, format error");
     }
@@ -117,16 +117,19 @@ if ((($row['banned'] == 'yes' || ($approvalNotAllowed && !$allowOwnerDownload)) 
     denyDownload();
 }
 
-if ($row['price'] > 0 && $CURUSER['id'] != $row['owner']) {
-    $hasBuy = \App\Models\TorrentBuyLog::query()->where('uid', $CURUSER['id'])->where('torrent_id', $id)->exists();
-    if (!$hasBuy) {
-        if ($CURUSER['seedbonus'] < $row['price']) {
-            stderr('Error', nexus_trans('bonus.not_enough', ['require_bonus' => number_format($row['price']), 'now_bonus' => number_format($CURUSER['seedbonus'])]));
-        }
-        $bonusRep = new \App\Repositories\BonusRepository();
-        $bonusRep->consumeToBuyTorrent($CURUSER['id'], $id, 'Web');
-    }
-}
+/**
+ * Migrate to announce.php, due to IYUU will download torrent automatically
+ */
+//if ($row['price'] > 0 && $CURUSER['id'] != $row['owner']) {
+//    $hasBuy = \App\Models\TorrentBuyLog::query()->where('uid', $CURUSER['id'])->where('torrent_id', $id)->exists();
+//    if (!$hasBuy) {
+//        if ($CURUSER['seedbonus'] < $row['price']) {
+//            stderr('Error', nexus_trans('bonus.not_enough', ['require_bonus' => number_format($row['price']), 'now_bonus' => number_format($CURUSER['seedbonus'])]));
+//        }
+//        $bonusRep = new \App\Repositories\BonusRepository();
+//        $bonusRep->consumeToBuyTorrent($CURUSER['id'], $id, 'Web');
+//    }
+//}
 
 sql_query("UPDATE torrents SET hits = hits + 1 WHERE id = ".sqlesc($id)) or sqlerr(__FILE__, __LINE__);
 
@@ -136,9 +139,8 @@ if (strlen($CURUSER['passkey']) != 32) {
 	$CURUSER['passkey'] = md5($CURUSER['username'].date("Y-m-d H:i:s").$CURUSER['passhash']);
 	sql_query("UPDATE users SET passkey=".sqlesc($CURUSER['passkey'])." WHERE id=".sqlesc($CURUSER['id']));
 }
-$trackerReportAuthKey = $torrentRep->getTrackerReportAuthKey($id, $CURUSER['id'], true);
 $dict = \Rhilip\Bencode\Bencode::load($fn);
-$dict['announce'] = $ssl_torrent . $base_announce_url . "?authkey=$trackerReportAuthKey";
+$dict['announce'] = $ssl_torrent . $base_announce_url . "?passkey=" . $CURUSER['passkey'];
 do_log(sprintf("[ANNOUNCE_URL], user: %s, torrent: %s, url: %s", $CURUSER['id'] ?? '', $id, $dict['announce']));
 /**
  * does not support multi-tracker
@@ -218,6 +220,5 @@ else
 //header ("Content-Disposition: attachment; filename=".$row["filename"]."");
 //ob_implicit_flush(true);
 //print(benc($dict));
-\Nexus\Database\NexusDB::cache_put("authkey2passkey:$trackerReportAuthKey", $CURUSER['passkey'], 3600*24);
 echo \Rhilip\Bencode\Bencode::encode($dict);
 ?>

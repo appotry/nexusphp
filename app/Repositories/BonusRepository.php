@@ -254,14 +254,19 @@ class BonusRepository extends BaseRepository
 
     public function consumeToBuyTorrent($uid, $torrentId, $channel = 'Web'): bool
     {
-        $user = User::query()->findOrFail($uid);
         $torrent = Torrent::query()->findOrFail($torrentId, Torrent::$commentFields);
         $requireBonus = $torrent->price;
-        NexusDB::transaction(function () use ($user, $requireBonus, $torrent, $channel) {
+        NexusDB::transaction(function () use ($requireBonus, $torrent, $channel, $uid) {
+            $userQuery = User::query();
+            if ($requireBonus > 0) {
+                $userQuery = $userQuery->lockForUpdate();
+            }
+            $user = $userQuery->findOrFail($uid);
+            $buyerLocale = $user->locale;
             $comment = nexus_trans('bonus.comment_buy_torrent', [
                 'bonus' => $requireBonus,
                 'torrent_id' => $torrent->id,
-            ], $user->locale);
+            ], $buyerLocale);
             do_log("comment: $comment");
             $this->consumeUserBonus($user, $requireBonus, BonusLogs::BUSINESS_TYPE_BUY_TORRENT, $comment);
             TorrentBuyLog::query()->create([
@@ -297,6 +302,18 @@ class BonusRepository extends BaseRepository
                 ];
                 BonusLogs::query()->insert($bonusLog);
             }
+            $buyTorrentSuccessMessage = [
+                'sender' => 0,
+                'receiver' => $user->id,
+                'added' => now(),
+                'subject' => nexus_trans("message.buy_torrent_success.subject", [], $buyerLocale),
+                'msg' => nexus_trans("message.buy_torrent_success.body", [
+                    'torrent_name' => $torrent->name,
+                    'bonus' => $requireBonus,
+                    'url' => sprintf('details.php?id=%s&hit=1', $torrent->id)
+                ], $buyerLocale),
+            ];
+            Message::add($buyTorrentSuccessMessage);
         });
 
         return true;
@@ -308,8 +325,8 @@ class BonusRepository extends BaseRepository
         if (!isset(BonusLogs::$businessTypes[$logBusinessType])) {
             throw new \InvalidArgumentException("Invalid logBusinessType: $logBusinessType");
         }
-        if (isset($userUpdates['seedbonus']) || isset($userUpdates['bonuscomment'])) {
-            throw new \InvalidArgumentException("Not support update seedbonus or bonuscomment");
+        if (isset($userUpdates['seedbonus']) || isset($userUpdates['bonuscomment']) || isset($userUpdates['modcomment'])) {
+            throw new \InvalidArgumentException("Not support update seedbonus or bonuscomment or modcomment");
         }
         if ($requireBonus <= 0) {
             return;
@@ -320,20 +337,17 @@ class BonusRepository extends BaseRepository
             throw new \LogicException("User bonus not enough.");
         }
         NexusDB::transaction(function () use ($user, $requireBonus, $logBusinessType, $logComment, $userUpdates) {
-            $logComment = addslashes($logComment);
-            $bonusComment = date('Y-m-d') . " - $logComment";
             $oldUserBonus = $user->seedbonus;
             $newUserBonus = bcsub($oldUserBonus, $requireBonus);
             $log = "user: {$user->id}, requireBonus: $requireBonus, oldUserBonus: $oldUserBonus, newUserBonus: $newUserBonus, logBusinessType: $logBusinessType, logComment: $logComment";
             do_log($log);
             $userUpdates['seedbonus'] = $newUserBonus;
-            $userUpdates['bonuscomment'] = NexusDB::raw("if(bonuscomment = '', '$bonusComment', concat_ws('\n', '$bonusComment', bonuscomment))");
             $affectedRows = NexusDB::table($user->getTable())
                 ->where('id', $user->id)
                 ->where('seedbonus', $oldUserBonus)
                 ->update($userUpdates);
             if ($affectedRows != 1) {
-                do_log("update user seedbonus affected rows != 1, query: " . last_query(), 'error');
+                do_log("update user seedbonus affected rows: ".$affectedRows." != 1, query: " . last_query(), 'error');
                 throw new \RuntimeException("Update user seedbonus fail.");
             }
             $nowStr = now()->toDateTimeString();
@@ -349,6 +363,7 @@ class BonusRepository extends BaseRepository
             ];
             BonusLogs::query()->insert($bonusLog);
             do_log("bonusLog: " . nexus_json_encode($bonusLog));
+            clear_user_cache($user->id, $user->passkey);
         });
     }
 

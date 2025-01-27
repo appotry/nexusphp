@@ -7,7 +7,7 @@ loggedinorreturn();
 parked();
 
 if (isset($_GET['id'])) {
-    $_GET['id'] = htmlspecialchars($_GET['id']);
+    $_GET['id'] = intval($_GET['id'] ?? 0);
 }
 $action = isset($_POST['action']) ? htmlspecialchars($_POST['action']) : (isset($_GET['action']) ? htmlspecialchars($_GET['action']) : '');
 $allowed_actions = array("list", "new", "newmessage", "view", "edit", "takeedit", "takeadded", "res", "takeres", "addamount", "delete", "confirm", "message", "search");
@@ -81,13 +81,15 @@ else {
                     print("<tr><td class=colhead align=left>{$lang_viewrequests['thead_name']}</td><td class=colhead align=center>{$lang_viewrequests['thead_price_newest']}</td><td class=colhead align=center>{$lang_viewrequests['thead_price_original']}</td><td class=colhead  align=center>{$lang_viewrequests['thead_comment_count']}</td><td class=colhead  align=center>{$lang_viewrequests['thead_on_request_count']}</td><td class=colhead align=center>{$lang_viewrequests['thead_request_user']}</td><td class=colhead align=center>{$lang_viewrequests['thead_created_at']}</td><td class=colhead align=center>{$lang_viewrequests['thead_status']}</td></tr>\n");
                     while ($row = mysql_fetch_array($rows)) {
                         print("<tr>
-	<td align=left class='rowfollow'><a href='viewrequests.php?action=view&id=" . $row["id"] . "'><b>" . $row["request"] . "</b></a></td>
-	<td align=center class='rowfollow nowrap'><font color=#ff0000><b>" . $row['amount'] . "</b></font></td>
-	<td align=center class='rowfollow nowrap'>" . $row['ori_amount'] . "</td>
-	<td align=center class='rowfollow nowrap'>" . ($row['comments']) . "</td><td align=center>" . ($row['Totalreq']) . "</td>
-	<td align=center class='rowfollow nowrap'>" . get_username($row['userid']) . "</td>
-	<td align=center class='rowfollow nowrap'>" . gettime($row['added'], true, false) . "</td>
-	<td align=center class='rowfollow nowrap'>" . ($row['finish'] == "yes" ? $lang_viewrequests['request_status_resolved'] : ($row['userid'] == $CURUSER['id'] ? $lang_viewrequests['request_status_resolving'] : "<a href='viewrequests.php?action=res&id=" . $row["id"] . "'>{$lang_viewrequests['request_status_resolving']}</a>")) . "</td></tr>\n");
+                                <td align=left class='rowfollow'><a href='viewrequests.php?action=view&id=" . $row["id"] . "'><b>" . $row["request"] . "</b></a></td>
+                                <td align=center class='rowfollow nowrap'><font color=#ff0000><b>" . $row['amount'] . "</b></font></td>
+                                <td align=center class='rowfollow nowrap'>" . $row['ori_amount'] . "</td>
+                                <td align=center class='rowfollow nowrap'>" . ($row['comments']) . "</td>
+                                <td align=center class='rowfollow nowrap'>" . ($row['Totalreq']) . "</td>
+                                <td align=center class='rowfollow nowrap'>" . get_username($row['userid']) . "</td>
+                                <td align=center class='rowfollow nowrap'>" . gettime($row['added'], true, false) . "</td>
+                                <td align=center class='rowfollow nowrap'>" . ($row['finish'] == "yes" ? $lang_viewrequests['request_status_resolved'] : ($row['userid'] == $CURUSER['id'] ? $lang_viewrequests['request_status_resolving'] : "<a href='viewrequests.php?action=res&id=" . $row["id"] . "'>{$lang_viewrequests['request_status_resolving']}</a>")) . "</td>
+                            </tr>\n");
                     }
                 }
                 print("</table>\n");
@@ -200,7 +202,7 @@ else {
                 print(
                     "<form id=edit method=post name=edit action=viewrequests.php >\n
 		<input type=hidden name=action  value=takeedit >
-		<input type=hidden name=reqid  value=" . $_GET["id"] . " >
+		<input type=hidden name=reqid  value=" . intval($_GET["id"] ?? 0) . " >
 		");
                 print("<table width=100% cellspacing=0 cellpadding=3><tr><td class=colhead align=center colspan=2>{$lang_functions['title_edit']}{$lang_viewrequests['request']}</td></tr>");
                 tr("{$lang_functions['col_name']}：", "<input name=request value=\"" . $arr["request"] . "\" size=134 ><br/>", 1);
@@ -247,7 +249,7 @@ else {
 
 
                 print(
-                    "<form id=reply name=reply method=post action=viewrequests.php >\n<input type=hidden name=action value=message ><input type=hidden name=id value=" . $_GET["id"] . " >\n");
+                    "<form id=reply name=reply method=post action=viewrequests.php >\n<input type=hidden name=action value=message ><input type=hidden name=id value=" . intval($_GET["id"] ?? 0) . " >\n");
                 print("<table width=100% cellspacing=0 cellpadding=3>\n");
 
                 print("<tr><td class=rowfollow align=left>");

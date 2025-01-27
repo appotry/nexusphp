@@ -8,7 +8,7 @@ $id = intval($_GET['id'] ?? 0);
 if (!$id)
 	die();
 
-$res = sql_query("SELECT torrents.*, categories.mode as cat_mode FROM torrents LEFT JOIN categories ON category = categories.id WHERE torrents.id = $id");
+$res = sql_query("SELECT torrents.*, categories.mode as cat_mode, torrent_extras.media_info as technical_info, torrent_extras.descr FROM torrents LEFT JOIN categories ON category = categories.id left join torrent_extras on torrents.id = torrent_extras.torrent_id WHERE torrents.id = $id");
 $row = mysql_fetch_assoc($res);
 if (!$row) die();
 
@@ -75,8 +75,13 @@ else {
 	"<input id=\"nfoupdate\" type=\"radio\" name=\"nfoaction\" value=\"update\" />".$lang_edit['radio_update']."</font><br /><input type=\"file\" name=\"nfo\" onchange=\"document.getElementById('nfoupdate').checked=true\" />", 1);
 
     //price
-    if (user_can('torrent-set-price')) {
-        tr(nexus_trans('label.torrent.price'), '<input type="number" min="0" name="price" value="'.$row['price'].'" />&nbsp;&nbsp;' . nexus_trans('label.torrent.price_help', ['tax_factor' => (floatval(get_setting('torrent.tax_factor', 0)) * 100) . '%']), 1);
+    if (user_can('torrent-set-price') && get_setting("torrent.paid_torrent_enabled") == "yes") {
+        $maxPrice = get_setting("torrent.max_price");
+        $pricePlaceholder = "";
+        if ($maxPrice > 0) {
+            $pricePlaceholder = nexus_trans("label.torrent.max_price_help", ["max_price" => $maxPrice]);
+        }
+        tr(nexus_trans('label.torrent.price'), '<input type="number" min="0" name="price" value="'.$row['price'].'" placeholder="'.$pricePlaceholder.'" />&nbsp;&nbsp;' . nexus_trans('label.torrent.price_help', ['tax_factor' => (floatval(get_setting('torrent.tax_factor', 0)) * 100) . '%']), 1);
     }
 
     print("<tr><td class=\"rowhead\">".$lang_edit['row_description']."<font color=\"red\">*</font></td><td class=\"rowfollow\">");
@@ -222,7 +227,7 @@ else {
 	print("<tr><td class=\"toolbox\" colspan=\"2\" align=\"center\"><input id=\"qr\" type=\"submit\" value=\"".$lang_edit['submit_edit_it']."\" /> <input type=\"reset\" value=\"".$lang_edit['submit_revert_changes']."\" /></td></tr>\n");
 	print("</table>\n");
 	print("</form>\n");
-	if (user_can('torrent-delete')) {
+	if (user_can('torrent-delete') && user_can('torrentmanage')) {
         print("<br /><br />");
         print("<form method=\"post\" action=\"delete.php\">\n");
         print("<input type=\"hidden\" name=\"id\" value=\"$id\" />\n");

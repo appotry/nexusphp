@@ -19,6 +19,10 @@ return [
         'subject' => 'Download permission canceled',
         'body' => 'Your download permission has been cancelled due to excessive upload speed, please file if you are a seed box user.' ,
     ],
+    'download_disable_announce_paid_torrent_too_many_times' => [
+        'subject' => 'Download permission canceled',
+        'body' => 'Your download permission has been cancelled due to announce to paid torrent too many times, please make sure you have enough bonus.' ,
+    ],
     'download_enable' => [
         'subject' => 'Download permission restored',
         'body' => 'Your download privileges restored, you can now download torrents. By: :operator',
@@ -34,9 +38,17 @@ return [
     'login_notify' => [
         'subject' => ':site_name Offsite login alert',
         'body' => <<<BODY
-You logged in at :this_login_time, IP::this_ip, location::this_location.
-Last login time::last_login_time, IP::last_ip, location::last_location.
+You logged in at::this_login_time, IP::this_ip, location::this_location.<br/>
+Last login time::last_login_time, IP::last_ip, location::last_location.<br/>
 If it is not your own operation, the account password may have been leaked, please change it in time!
 BODY,
+    ],
+    'buy_torrent_success' => [
+        'subject' => 'Successful torrent purchase reminder',
+        'body' => 'You spent :bonus bonus to successfully buy the torrent:[url=:url]:torrent_name[/url]',
+    ],
+    'exam_user_end_time_updated' => [
+        'subject' => 'Exam :exam_name end time changed',
+        'body' => 'The end time of your in-progress exam :exam_name has changed from :old_end_time to :new_end_time. admin: :operator, reason: :reason.',
     ],
 ];

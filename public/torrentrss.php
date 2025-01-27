@@ -71,7 +71,7 @@ if (isset($searchstr)){
 
 	$ANDOR = ($search_mode == 0 ? " AND " : " OR ");	// only affects mode 0 and mode 1
 	foreach ($like_expression_array as &$like_expression_array_element)
-		$like_expression_array_element = "(torrents.name" . $like_expression_array_element.($_GET['ismalldescr'] ? " OR torrents.small_descr". $like_expression_array_element : "").")";
+		$like_expression_array_element = "(torrents.name" . $like_expression_array_element . (isset($_GET['ismalldescr']) && $_GET['ismalldescr'] ? " OR torrents.small_descr" . $like_expression_array_element : "") . ")";
 	$wherea[] = implode($ANDOR, $like_expression_array);
 	$where .= ($where ? " AND " : "") . implode(" AND ", $wherea);
 }
@@ -171,15 +171,14 @@ if ($where) {
     }
 }
 $sort = "id desc";
-$fieldStr = "torrents.id, torrents.category, torrents.name, torrents.small_descr, torrents.descr, torrents.info_hash, torrents.size, torrents.added, torrents.anonymous, torrents.owner, categories.name AS category_name";
-//$query = "SELECT torrents.id, torrents.category, torrents.name, torrents.small_descr, torrents.descr, torrents.info_hash, torrents.size, torrents.added, torrents.anonymous, users.username AS username, categories.id AS cat_id, categories.name AS cat_name FROM torrents LEFT JOIN categories ON category = categories.id LEFT JOIN users ON torrents.owner = users.id $where ORDER BY $sort LIMIT $limit";
+$fieldStr = "torrents.id, torrents.category, torrents.name, torrents.small_descr, torrent_extras.descr, torrents.info_hash, torrents.size, torrents.added, torrents.anonymous, torrents.owner, categories.name AS category_name";
 if (!$noNormalResults) {
-    $query = "SELECT $fieldStr FROM torrents LEFT JOIN categories ON category = categories.id $normalWhere ORDER BY $sort LIMIT $limit";
+    $query = "SELECT $fieldStr FROM torrents LEFT JOIN categories ON category = categories.id left join torrent_extras on torrent_extras.torrent_id = torrents.id $normalWhere ORDER BY $sort LIMIT $limit";
     $normalRows = \Nexus\Database\NexusDB::select($query);
 }
 if (!empty($prependIdArr) && $startindex == 0) {
     $prependIdStr = implode(',', $prependIdArr);
-    $prependRows = \Nexus\Database\NexusDB::select("SELECT $fieldStr FROM torrents LEFT JOIN categories ON category = categories.id where torrents.id in ($prependIdStr) and $where ORDER BY field(torrents.id, $prependIdStr)");
+    $prependRows = \Nexus\Database\NexusDB::select("SELECT $fieldStr FROM torrents LEFT JOIN categories ON category = categories.id left join torrent_extras on torrent_extras.torrent_id = torrents.id where torrents.id in ($prependIdStr) and $where ORDER BY field(torrents.id, $prependIdStr)");
 }
 $list = [];
 foreach ($prependRows as $row) {
@@ -231,12 +230,16 @@ foreach ($list as $row)
 {
     $ownerInfo = get_user_row($row['owner']);
 	$title = "";
-	if ($row['anonymous'] == 'yes')
-		$author = 'anonymous';
-	else $author = $ownerInfo['username'];
+	if ($row['anonymous'] == 'yes') {
+        $author = 'anonymous';
+    } elseif (!empty($ownerInfo)) {
+        $author = $ownerInfo['username'];
+    } else {
+        $author = nexus_trans("nexus.user_not_exists");
+    }
 	$itemurl = $url."/details.php?id=".$row['id'];
 	if ($dllink)
-		$itemdlurl = $url."/download.php?id=".$row['id']."&amp;downhash=" . rawurlencode( $user['id'] . '|'. $torrentRep->encryptDownHash($row['id'], $user));
+		$itemdlurl = $torrentRep->getDownloadUrl($row['id'], $user);
 	else $itemdlurl = $url."/download.php?id=".$row['id'];
 	if (!empty($_GET['icat'])) $title .= "[".$row['category_name']."]";
 	$title .= $row['name'];

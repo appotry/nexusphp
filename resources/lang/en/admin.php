@@ -8,7 +8,7 @@ return [
         'tags_list' => 'Tags',
         'agent_allows' => 'Agent Allows',
         'agent_denies' => 'Agent Denies',
-        'exams_list' => 'Exams',
+        'exams_list' => 'Exams & Tasks',
         'medals_list' => 'Medals',
         'settings' => 'Settings',
         'users_medals' => 'User medals',
@@ -37,6 +37,11 @@ return [
         'login_log' => 'Login logs',
         'bonus_log' => 'Bonus logs',
         'torrent_buy_log' => 'Torrent buy logs',
+        'attendance_log' => 'Attendance logs',
+        'oauth_client' => 'Client',
+        'oauth_access_token' => 'Access tokens',
+        'oauth_auth_code' => 'Auth codes',
+        'oauth_refresh_token' => 'Refresh tokens',
     ],
     'resources' => [
         'agent_allow' => [
@@ -88,7 +93,9 @@ return [
         ],
         'exam_user' => [
             'bulk_action_avoid_label' => 'Bulk avoid',
+            'bulk_action_update_end_label' => 'Bulk modify end time',
             'action_avoid' => 'Avoid',
+            'action_update_end' => 'Modify end time',
             'result_passed' => 'Passed!',
             'result_not_passed' => 'Not passed!',
         ],
@@ -111,6 +118,8 @@ return [
         ],
         'seed_box_record' => [
             'toggle_status' => 'Change status',
+            'check_modal_btn' => 'Check',
+            'check_modal_header' => 'Detect if IP is SeedBox',
         ],
         'tag' => [
             'detach_torrents' => 'Detach all torrents',

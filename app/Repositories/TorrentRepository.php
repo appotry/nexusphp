@@ -21,6 +21,7 @@ use App\Models\StaffMessage;
 use App\Models\Standard;
 use App\Models\Team;
 use App\Models\Torrent;
+use App\Models\TorrentBuyLog;
 use App\Models\TorrentOperationLog;
 use App\Models\TorrentSecret;
 use App\Models\TorrentTag;
@@ -33,9 +34,25 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Nexus\Database\NexusDB;
+use Nexus\Imdb\Imdb;
+use Rhilip\Bencode\Bencode;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class TorrentRepository extends BaseRepository
 {
+    const BOUGHT_USER_CACHE_KEY_PREFIX = "torrent_purchasers";
+
+    const BUY_FAIL_CACHE_KEY_PREFIX = "torrent_purchase_fails";
+
+    const PIECES_HASH_CACHE_KEY = "torrent_pieces_hash";
+
+    const BUY_STATUS_SUCCESS = 0;
+    const BUY_STATUS_NOT_YET = -1;
+    const BUY_STATUS_UNKNOWN = -2;
+
+
+
     /**
      *  fetch torrent list
      *
@@ -93,9 +110,8 @@ class TorrentRepository extends BaseRepository
 
         $with = ['user', 'tags'];
         $torrents = $query->with($with)->paginate();
-        $userArr = $user->toArray();
         foreach ($torrents as &$item) {
-            $item->download_url = $this->getDownloadUrl($item->id, $userArr);
+            $item->download_url = $this->getDownloadUrl($item->id, $user);
         }
         return $torrents;
     }
@@ -112,15 +128,15 @@ class TorrentRepository extends BaseRepository
             },
         ];
         $result = Torrent::query()->with($with)->withCount(['peers', 'thank_users', 'reward_logs'])->visible()->findOrFail($id);
-        $result->download_url = $this->getDownloadUrl($id, $user->toArray());
+        $result->download_url = $this->getDownloadUrl($id, $user);
         return $result;
     }
 
-    private function getDownloadUrl($id, array $user): string
+    public function getDownloadUrl($id, array|User $user): string
     {
         return sprintf(
-            '%s/download.php?downhash=%s|%s',
-            getSchemeAndHttpHost(), $user['id'], $this->encryptDownHash($id, $user)
+            '%s/download.php?downhash=%s.%s',
+            getSchemeAndHttpHost(), is_array($user) ? $user['id'] : $user->id, $this->encryptDownHash($id, $user)
         );
     }
 
@@ -246,7 +262,7 @@ class TorrentRepository extends BaseRepository
     public function getPeerUploadSpeed($peer): string
     {
         $diff = $peer->uploaded - $peer->uploadoffset;
-        $seconds = max(1, $peer->started->diffInSeconds($peer->last_action));
+        $seconds = max(1, $peer->started->diffInSeconds($peer->last_action, true));
         return mksize($diff / $seconds) . '/s';
     }
 
@@ -254,9 +270,9 @@ class TorrentRepository extends BaseRepository
     {
         $diff = $peer->downloaded - $peer->downloadoffset;
         if ($peer->isSeeder()) {
-            $seconds = max(1, $peer->started->diffInSeconds($peer->finishedat));
+            $seconds = max(1, $peer->started->diffInSeconds($peer->finishedat, true));
         } else {
-            $seconds = max(1, $peer->started->diffInSeconds($peer->last_action));
+            $seconds = max(1, $peer->started->diffInSeconds($peer->last_action, true));
         }
         return mksize($diff / $seconds) . '/s';
     }
@@ -328,27 +344,51 @@ class TorrentRepository extends BaseRepository
     public function encryptDownHash($id, $user): string
     {
         $key = $this->getEncryptDownHashKey($user);
-        return (new Hashids($key))->encode($id);
+        $payload = [
+            'id' => $id,
+            'exp' => time() + 3600
+        ];
+        return JWT::encode($payload, $key, 'HS256');
     }
 
     public function decryptDownHash($downHash, $user)
     {
         $key = $this->getEncryptDownHashKey($user);
-        return (new Hashids($key))->decode($downHash);
+        try {
+            $decoded = JWT::decode($downHash, new Key($key, 'HS256'));
+            return [$decoded->id];
+        } catch (\Exception $e) {
+            do_log("Invalid down hash: $downHash, " . $e->getMessage(), "error");
+            return '';
+        }
     }
 
     private function getEncryptDownHashKey($user)
     {
-        if ($user instanceof User) {
-            $user = $user->toArray();
+        $passkey = "";
+        if ($user instanceof User && $user->passkey) {
+            $passkey = $user->passkey;
+        } elseif (is_array($user) && !empty($user['passkey'])) {
+            $passkey = $user['passkey'];
+        } elseif (is_scalar($user)) {
+            $user = User::query()->findOrFail(intval($user), ['id', 'passkey']);
+            $passkey = $user->passkey;
         }
-        if (!is_array($user) || empty($user['passkey']) || empty($user['id'])) {
-            $user = User::query()->findOrFail(intval($user), ['id', 'passkey'])->toArray();
+        if (empty($passkey)) {
+            throw new \InvalidArgumentException("Invalid user: " . json_encode($user));
         }
         //down hash is relative to user passkey
-        return md5($user['passkey'] . date('Ymd') . $user['id']);
+        return md5($passkey . date('Ymd') . $user['id']);
     }
 
+    /**
+     * @deprecated
+     * @param $id
+     * @param $uid
+     * @param $initializeIfNotExists
+     * @return string
+     * @throws NexusException
+     */
     public function getTrackerReportAuthKey($id, $uid, $initializeIfNotExists = false): string
     {
         $key = $this->getTrackerReportAuthKeySecret($id, $uid, $initializeIfNotExists);
@@ -357,6 +397,8 @@ class TorrentRepository extends BaseRepository
     }
 
     /**
+     * @deprecated
+     *
      * check tracker report authkey
      * if valid, the result will be the date the key generate, else if will be empty string
      *
@@ -381,12 +423,14 @@ class TorrentRepository extends BaseRepository
 
     private function getTrackerReportAuthKeySecret($id, $uid, $initializeIfNotExists = false)
     {
-        $secret = TorrentSecret::query()
-            ->where('uid', $uid)
-            ->whereIn('torrent_id', [0, $id])
-            ->orderBy('torrent_id', 'desc')
-            ->orderBy('id', 'desc')
-            ->first();
+        $secret = NexusDB::remember("torrent_secret_{$uid}_{$id}", 3600, function () use ($id, $uid) {
+            return TorrentSecret::query()
+                ->where('uid', $uid)
+                ->whereIn('torrent_id', [0, $id])
+                ->orderBy('torrent_id', 'desc')
+                ->orderBy('id', 'desc')
+                ->first();
+        });
 
         if ($secret) {
             return $secret->secret;
@@ -506,7 +550,7 @@ class TorrentRepository extends BaseRepository
                     $hasBeenDownloaded = Snatch::query()->where('torrentid', $torrent->id)->exists();
                     $log = "Torrent: {$torrent->id} is in promotion, hasBeenDownloaded: $hasBeenDownloaded";
                     if (!$hasBeenDownloaded) {
-                        $diffInSeconds = $torrent->promotion_until->diffInSeconds($torrent->added);
+                        $diffInSeconds = $torrent->promotion_until->diffInSeconds($torrent->added, true);
                         $log .= ", addSeconds: $diffInSeconds";
                         $torrentUpdate['promotion_until'] = $torrent->promotion_until->addSeconds($diffInSeconds);
                     }
@@ -656,6 +700,7 @@ class TorrentRepository extends BaseRepository
             'hr' => $hrStatus,
         ];
         $idArr = Arr::wrap($id);
+        do_log(sprintf("set torrent: %s hr: %s", implode(",", $idArr), $hrStatus));
         return Torrent::query()->whereIn('id', $idArr)->update($update);
     }
 
@@ -703,29 +748,7 @@ HTML;
         return $input;
     }
 
-    public function removeDuplicateSnatch()
-    {
-        $size = 2000;
-        $stickyPromotionExists = NexusDB::hasTable('');
-        while (true) {
-            $snatchRes = NexusDB::select("select userid, torrentid, group_concat(id) as ids from snatched group by userid, torrentid having(count(*)) > 1 limit $size");
-            if (empty($snatchRes)) {
-                break;
-            }
-            do_log("[DELETE_DUPLICATED_SNATCH], count: " . count($snatchRes));
-            foreach ($snatchRes as $snatchRow) {
-                $torrentId = $snatchRow['torrentid'];
-                $userId = $snatchRow['userid'];
-                $idArr = explode(',', $snatchRow['ids']);
-                sort($idArr, SORT_NUMERIC);
-                $remainId = array_pop($idArr);
-                $delIdStr = implode(',', $idArr);
-                do_log("[DELETE_DUPLICATED_SNATCH], torrent: $torrentId, user: $userId, snatchIdStr: $delIdStr");
-                NexusDB::statement("delete from snatched where id in ($delIdStr)");
-                NexusDB::statement("update claims set snatched_id = $remainId where torrent_id = $torrentId and uid = $userId");
-            }
-        }
-    }
+
 
     public function getPaidIcon(array $torrentInfo, $size = 16, $verticalAlign = 'sub')
     {
@@ -733,6 +756,252 @@ HTML;
             return '';
         }
         return sprintf('<span title="%s" style="vertical-align: %s"><svg t="1676058062789" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="3406" width="%s" height="%s"><path d="M554.666667 810.666667v42.666666h-85.333334v-42.666666c-93.866667 0-170.666667-76.8-170.666666-170.666667h85.333333c0 46.933333 38.4 85.333333 85.333333 85.333333v-170.666666c-93.866667 0-170.666667-76.8-170.666666-170.666667s76.8-170.666667 170.666666-170.666667V170.666667h85.333334v42.666666c93.866667 0 170.666667 76.8 170.666666 170.666667h-85.333333c0-46.933333-38.4-85.333333-85.333333-85.333333v170.666666h17.066666c29.866667 0 68.266667 17.066667 98.133334 42.666667 34.133333 29.866667 59.733333 76.8 59.733333 128-4.266667 93.866667-81.066667 170.666667-174.933333 170.666667z m0-85.333334c46.933333 0 85.333333-38.4 85.333333-85.333333s-38.4-85.333333-85.333333-85.333333v170.666666zM469.333333 298.666667c-46.933333 0-85.333333 38.4-85.333333 85.333333s38.4 85.333333 85.333333 85.333333V298.666667z" fill="#CD7F32" p-id="3407"></path></svg></span>', nexus_trans('torrent.paid_torrent'), $verticalAlign, $size, $size);
+    }
+
+    public function loadBoughtUser($torrentId): int
+    {
+        $size = 500;
+        $page = 1;
+        $key = $this->getBoughtUserCacheKey($torrentId);
+        $redis = NexusDB::redis();
+        $total = 0;
+        while (true) {
+            $list = TorrentBuyLog::query()->where("torrent_id", $torrentId)->forPage($page, $size)->get(['torrent_id', 'uid']);
+            if ($list->isEmpty()) {
+                break;
+            }
+            foreach ($list as $item) {
+                $redis->hSet($key, $item->uid, 1);
+                $total += 1;
+                do_log(sprintf("hset %s %s 1", $key, $item->uid));
+            }
+            $page++;
+        }
+        do_log("torrent_purchasers:$torrentId LOAD DONE, total: $total");
+        if ($total > 0) {
+            $redis->expire($key, 86400*30);
+        }
+        return $total;
+    }
+
+    /**
+     * 购买成功缓存，保存为 hash，一个种子一个 hash，永久有效
+     * @param $uid
+     * @param $torrentId
+     * @return void
+     * @throws \RedisException
+     */
+    public function addBuySuccessCache($uid, $torrentId): void
+    {
+        NexusDB::redis()->hSet($this->getBoughtUserCacheKey($torrentId), $uid, 1);
+    }
+
+    public function hasBuySuccessCache($uid, $torrentId): bool
+    {
+        return NexusDB::redis()->hGet($this->getBoughtUserCacheKey($torrentId), $uid) == 1;
+    }
+
+    /**
+     * 获取购买种子的缓存状态
+     *
+     * @param $uid
+     * @param $torrentId
+     * @return int
+     */
+    public function getBuyStatus($uid, $torrentId): int
+    {
+        //查询是否已经购买
+        if ($this->hasBuySuccessCache($uid, $torrentId)) {
+            return self::BUY_STATUS_SUCCESS;
+        }
+        //是否购买失败过
+        $buyFailCount = $this->getBuyFailCache($uid, $torrentId);
+        if ($buyFailCount > 0) {
+            //根据失败次数，禁用下载权限并做提示等
+            return $buyFailCount;
+        }
+        //不是成功或失败，直接返回未知
+        return self::BUY_STATUS_UNKNOWN;
+    }
+
+    /**
+     * 添加购买失败缓存, 结果累加
+     * @param $uid
+     * @param $torrentId
+     * @return void
+     * @throws \RedisException
+     */
+    public function addBuyFailCache($uid, $torrentId): void
+    {
+        $key = $this->getBuyFailCacheKey($uid, $torrentId);
+        $result = NexusDB::redis()->incr($key);
+        if ($result == 1) {
+            NexusDB::redis()->expire($key, 3600);
+        }
+    }
+
+    /**
+     * 获取失败缓存 ，结果是失败的次数
+     *
+     * @param $uid
+     * @param $torrentId
+     * @return int
+     * @throws \RedisException
+     */
+    public function getBuyFailCache($uid, $torrentId): int
+    {
+        return intval(NexusDB::redis()->get($this->getBuyFailCacheKey($uid, $torrentId)));
+    }
+
+    /**
+     * 购买成功缓存 key
+     * @param $torrentId
+     * @return string
+     */
+    public function getBoughtUserCacheKey($torrentId): string
+    {
+        return  sprintf("%s:%s", self::BOUGHT_USER_CACHE_KEY_PREFIX, $torrentId);
+    }
+
+    /**
+     * 购买失败缓存 key
+     * @param int $userId
+     * @param int $torrentId
+     * @return string
+     */
+    public function getBuyFailCacheKey(int $userId, int $torrentId): string
+    {
+        return sprintf("%s:%s:%s", self::BUY_FAIL_CACHE_KEY_PREFIX, $userId, $torrentId);
+    }
+
+    public function addPiecesHashCache(int $torrentId, string $piecesHash): bool|int|\Redis
+    {
+        $value = $this->buildPiecesHashCacheValue($torrentId, $piecesHash);
+        return NexusDB::redis()->hSet(self::PIECES_HASH_CACHE_KEY, $piecesHash, $value);
+    }
+
+    private  function buildPiecesHashCacheValue(int $torrentId, string $piecesHash): bool|string
+    {
+        return  json_encode(['torrent_id' => $torrentId, 'pieces_hash' => $piecesHash]);
+    }
+
+    public function delPiecesHashCache(string $piecesHash): bool|int|\Redis
+    {
+        return NexusDB::redis()->hDel(self::PIECES_HASH_CACHE_KEY, $piecesHash);
+    }
+
+    public function getPiecesHashCache($piecesHash): array
+    {
+        if (!is_array($piecesHash)) {
+            $piecesHash = [$piecesHash];
+        }
+        $maxCount = 100;
+        if (count($piecesHash) > $maxCount) {
+            throw new \InvalidArgumentException("too many pieces hash, must less then $maxCount");
+        }
+        $pipe = NexusDB::redis()->multi(\Redis::PIPELINE);
+        foreach ($piecesHash as $hash) {
+            $pipe->hGet(self::PIECES_HASH_CACHE_KEY, $hash);
+        }
+        $results = $pipe->exec();
+        $logPrefix = sprintf("piecesHashCount: %s, resultCount: %s", count($piecesHash), count($results));
+        $out = [];
+        foreach ($results as $item) {
+            $arr = json_decode($item, true);
+            if (is_array($arr) && isset($arr['torrent_id'], $arr['pieces_hash'])) {
+                $out[$arr['pieces_hash']] = $arr['torrent_id'];
+            } else {
+                do_log(sprintf("%s, invalid item: %s(%s)", $logPrefix, var_export($item, true), gettype($item)));
+            }
+        }
+        return $out;
+    }
+
+    public function loadPiecesHashCache($id = 0): array
+    {
+        $page = 1;
+        $size = 1000;
+        $query = Torrent::query();
+        if ($id) {
+            $query = $query->whereIn("id", Arr::wrap($id));
+        }
+        $total = $success = 0;
+        $torrentDir = sprintf(
+            "%s/%s/",
+            rtrim(ROOT_PATH, '/'),
+            rtrim(get_setting("main.torrent_dir"), '/')
+        );
+        while (true) {
+            $list = (clone $query)->forPage($page, $size)->get(['id', 'pieces_hash']);
+            if ($list->isEmpty()) {
+                do_log("page: $page, size: $size, no more data...");
+                break;
+            }
+            $pipe = NexusDB::redis()->multi(\Redis::PIPELINE);
+            $piecesHashCaseWhen = $updateIdArr = [];
+            $currentCount = 0;
+            foreach ($list as $item) {
+                $total++;
+                try {
+                    $piecesHash = $item->pieces_hash;
+                    if (!$piecesHash) {
+                        $torrentFile = $torrentDir . $item->id . ".torrent";
+                        $loadResult = Bencode::load($torrentFile);
+                        $piecesHash = sha1($loadResult['info']['pieces']);
+                        $piecesHashCaseWhen[] = sprintf("when %s then '%s'", $item->id, $piecesHash);
+                        $updateIdArr[] = $item->id;
+                        do_log(sprintf("torrent: %s no pieces hash, load from torrent file: %s, pieces hash: %s", $item->id, $torrentFile, $piecesHash));
+                    }
+                    $pipe->hSet(self::PIECES_HASH_CACHE_KEY, $piecesHash, $this->buildPiecesHashCacheValue($item->id, $piecesHash));
+                    $success++;
+                    $currentCount++;
+                } catch (\Exception $exception) {
+                    do_log(sprintf("load pieces hash of torrent: %s error: %s", $item->id, $exception->getMessage()), 'error');
+                }
+            }
+            $pipe->exec();
+            if (!empty($piecesHashCaseWhen)) {
+                $sql = sprintf(
+                    "update torrents set pieces_hash = case id %s end where id in (%s)",
+                    implode(' ', $piecesHashCaseWhen),
+                    implode(", ", $updateIdArr)
+                );
+                NexusDB::statement($sql);
+            }
+            do_log("success load page: $page, size: $size, count: $currentCount");
+            $page++;
+        }
+        do_log("[DONE], total: $total, success: $success");
+        return compact('total', 'success');
+    }
+
+    public function fetchImdb(int $torrentId): void
+    {
+        $torrent = Torrent::query()->findOrFail($torrentId, ["id", "url", "cache_stamp"]);
+        $imdb_id = parse_imdb_id($torrent->url);
+        $log = sprintf("fetchImdb torrentId: %s", $torrentId);
+        if (!$imdb_id) {
+            do_log("$log, no imdb_id");
+            return;
+        }
+        $thenumbers = $imdb_id;
+        $imdb = new Imdb();
+        $torrent->cache_stamp = time();
+        $torrent->save();
+
+        $imdb->purgeSingle($imdb_id);
+
+        try {
+            $imdb->updateCache($imdb_id);
+            NexusDB::cache_del('imdb_id_'.$thenumbers.'_movie_name');
+            NexusDB::cache_del('imdb_id_'.$thenumbers.'_large', true);
+            NexusDB::cache_del('imdb_id_'.$thenumbers.'_median', true);
+            NexusDB::cache_del('imdb_id_'.$thenumbers.'_minor', true);
+            do_log("$log, done");
+        } catch (\Exception $e) {
+            $log .= ", error: " . $e->getMessage() . ", trace: " . $e->getTraceAsString();
+            do_log($log, 'error');
+        }
     }
 
 }

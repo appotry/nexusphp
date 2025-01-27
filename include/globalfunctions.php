@@ -49,7 +49,7 @@ function validip($ip)
 	else return false;
 }
 
-function getip() {
+function getip($real = true) {
 	if (isset($_SERVER)) {
 		if (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && validip($_SERVER['HTTP_X_FORWARDED_FOR'])) {
 			$ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
@@ -67,7 +67,10 @@ function getip() {
 			$ip = getenv('REMOTE_ADDR') ?? '';
 		}
 	}
-
+    $ip = trim(trim($ip), ",");
+    if ($real && str_contains($ip, ",")) {
+        return strstr($ip, ",", true);
+    }
 	return $ip;
 }
 
@@ -213,7 +216,7 @@ function do_log($log, $level = 'info', $echo = false)
         sprintf('%.3f', microtime(true) - (nexus() ? nexus()->getStartTimestamp() : 0)),
         $uid,
         $passkey,
-        $env, $level,
+        $env, strtoupper($level),
         $backtrace[0]['file'] ?? '',
         $backtrace[0]['line'] ?? '',
         $backtrace[1]['class'] ?? '',
@@ -260,6 +263,10 @@ function getLogFile($append = '')
     $name = $prefix;
     if ($append) {
         $name .= "-$append";
+    }
+    if (isRunningInConsole()) {
+        $scriptUserInfo = posix_getpwuid(posix_getuid());
+        $name .= sprintf("-cli-%s", $scriptUserInfo['name']);
     }
     $logFile = sprintf('%s-%s%s', $name, date('Y-m-d'), $suffix);
     return $logFiles[$append] = $logFile;
@@ -467,20 +474,26 @@ function arr_set(&$array, $key, $value)
 
 function isHttps(): bool
 {
-    $schema = nexus()->getRequestSchema();
-    return $schema == 'https';
+    if (isRunningInConsole()) {
+        $securityLogin = get_setting("security.securelogin");
+        if ($securityLogin != "no") {
+            return true;
+        }
+        return false;
+    }
+    return nexus()->getRequestSchema() == 'https';
 }
 
 
-function getSchemeAndHttpHost()
+function getSchemeAndHttpHost(bool $fromConfig = false)
 {
-    global $BASEURL;
-    if (isRunningInConsole()) {
-        return $BASEURL;
+    if (isRunningInConsole() || $fromConfig) {
+        $host = get_setting("basic.BASEURL");
+    } else {
+        $host = nexus()->getRequestHost();
     }
     $isHttps = isHttps();
     $protocol = $isHttps ? 'https' : 'http';
-    $host = nexus()->getRequestHost();
     return "$protocol://" . $host;
 }
 
@@ -779,6 +792,24 @@ function get_user_id()
     return auth()->user()->id ?? 0;
 }
 
+function get_user_passkey()
+{
+    if (IN_NEXUS) {
+        global $CURUSER;
+        return $CURUSER["passkey"] ?? "";
+    }
+    return auth()->user()->passkey ?? "";
+}
+
+function get_pure_username()
+{
+    if (IN_NEXUS) {
+        global $CURUSER;
+        return $CURUSER["username"] ?? "";
+    }
+    return auth()->user()->username ?? "";
+}
+
 function nexus()
 {
     return \Nexus\Nexus::instance();
@@ -830,7 +861,52 @@ function do_action($name, ...$args)
     return $hook->doAction(...func_get_args());
 }
 
-function isIPSeedBox($ip, $uid = null, $withoutCache = false): bool
+function isIPSeedBoxFromASN($ip, $exceptionWhenYes = false): bool
+{
+    $redis = \Nexus\Database\NexusDB::redis();
+    $key = "nexus_asn";
+    $notFoundCacheValue = "__NOT_FOUND__";
+   try {
+       static $reader;
+       $database = nexus_env('GEOIP2_ASN_DATABASE');
+       if (!file_exists($database) || !is_readable($database)) {
+           do_log("GEOIP2_ASN_DATABASE: $database not exists or not readable", "debug");
+           return false;
+       }
+       if (is_null($reader)) {
+           $reader = new \GeoIp2\Database\Reader($database);
+       }
+       $asnObj = $reader->asn($ip);
+       $asn = $asnObj->autonomousSystemNumber;
+       if ($asn <= 0) {
+           return false;
+       }
+       $cacheResult = $redis->hGet($key, $asn);
+       if ($cacheResult !== false) {
+           if ($cacheResult === $notFoundCacheValue) {
+               return false;
+           } else {
+               return true;
+           }
+       }
+       $row = \Nexus\Database\NexusDB::getOne("seed_box_records", "asn = $asn", "id");
+       if (!empty($row)) {
+           $redis->hSet($key, $asn, $row['id']);
+       } else {
+           $redis->hSet($key, $asn, $notFoundCacheValue);
+       }
+   } catch (\Throwable $throwable) {
+       do_log("ip: $ip, " . $throwable->getMessage());
+       $redis->hSet($key, $asn, $notFoundCacheValue);
+   }
+   $result = !empty($row);
+   if ($result && $exceptionWhenYes) {
+       throw new \App\Exceptions\SeedBoxYesException($row['id']);
+   }
+   return $result;
+}
+
+function isIPSeedBox($ip, $uid, $withoutCache = false, $exceptionWhenYes = false): bool
 {
     $key = "nexus_is_ip_seed_box:ip:$ip:uid:$uid";
     $cacheData = \Nexus\Database\NexusDB::cache_get($key);
@@ -838,39 +914,53 @@ function isIPSeedBox($ip, $uid = null, $withoutCache = false): bool
         do_log("$key, get result from cache: $cacheData(" . gettype($cacheData) . ")");
         return (bool)$cacheData;
     }
+    //check from asn
+    $res = isIPSeedBoxFromASN($ip, $exceptionWhenYes);
+    if (!empty($res)) {
+        \Nexus\Database\NexusDB::cache_put($key, 1, 300);
+        do_log("$key, get result from asn, true");
+        return true;
+    }
+
     $ipObject = \PhpIP\IP::create($ip);
     $ipNumeric = $ipObject->numeric();
     $ipVersion = $ipObject->getVersion();
     //check allow list first, not consider specific user
     $checkSeedBoxAllowedSql = sprintf(
-        'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `version` = %s and `status` = %s and `is_allowed` = 1 limit 1',
+        'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `version` = %s and `status` = %s and `is_allowed` = 1 and asn = 0 limit 1',
         $ipNumeric, $ipNumeric, $ipVersion, \App\Models\SeedBoxRecord::STATUS_ALLOWED
     );
     $res = \Nexus\Database\NexusDB::select($checkSeedBoxAllowedSql);
     if (!empty($res)) {
-        \Nexus\Database\NexusDB::cache_put($key, 1, 300);
+        \Nexus\Database\NexusDB::cache_put($key, 0, 300);
         do_log("$key, get result from database, is_allowed = 1, false");
         return false;
     }
     $checkSeedBoxAdminSql = sprintf(
-        'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `type` = %s and `version` = %s and `status` = %s and `is_allowed` = 0 limit 1',
+        'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `type` = %s and `version` = %s and `status` = %s and `is_allowed` = 0 and asn = 0 limit 1',
         $ipNumeric, $ipNumeric, \App\Models\SeedBoxRecord::TYPE_ADMIN, $ipVersion, \App\Models\SeedBoxRecord::STATUS_ALLOWED
     );
     $res = \Nexus\Database\NexusDB::select($checkSeedBoxAdminSql);
     if (!empty($res)) {
         \Nexus\Database\NexusDB::cache_put($key, 1, 300);
         do_log("$key, get result from admin, true");
+        if ($exceptionWhenYes) {
+            throw new \App\Exceptions\SeedBoxYesException($res[0]['id']);
+        }
         return true;
     }
     if ($uid !== null) {
         $checkSeedBoxUserSql = sprintf(
-            'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `uid` = %s and `type` = %s and `version` = %s and `status` = %s and `is_allowed` = 0  limit 1',
+            'select id from seed_box_records where `ip_begin_numeric` <= "%s" and `ip_end_numeric` >= "%s" and `uid` = %s and `type` = %s and `version` = %s and `status` = %s and `is_allowed` = 0 and asn = 0  limit 1',
             $ipNumeric, $ipNumeric, $uid, \App\Models\SeedBoxRecord::TYPE_USER, $ipVersion, \App\Models\SeedBoxRecord::STATUS_ALLOWED
         );
         $res = \Nexus\Database\NexusDB::select($checkSeedBoxUserSql);
         if (!empty($res)) {
             \Nexus\Database\NexusDB::cache_put($key, 1, 300);
             do_log("$key, get result from user, true");
+            if ($exceptionWhenYes) {
+                throw new \App\Exceptions\SeedBoxYesException($res[0]['id']);
+            }
             return true;
         }
     }
@@ -910,13 +1000,13 @@ function getDataTraffic(array $torrent, array $queries, array $user, $peer, $sna
         }
         $uploaderRatio = get_setting('torrent.uploaderdouble');
         $log .= ", uploaderRatio: $uploaderRatio";
-        if ($torrent['owner'] == $user['id']) {
+        if ($torrent['owner'] == $user['id'] && $uploaderRatio != 1) {
             //uploader, use the bigger one
             $upRatio = max($uploaderRatio, \App\Models\Torrent::$promotionTypes[$spStateReal]['up_multiplier']);
-            $log .= ", [IS_UPLOADER], upRatio: $upRatio";
+            $log .= ", [IS_UPLOADER] && uploaderRatio != 1, upRatio: $upRatio";
         } else {
             $upRatio = \App\Models\Torrent::$promotionTypes[$spStateReal]['up_multiplier'];
-            $log .= ", [IS_NOT_UPLOADER], upRatio: $upRatio";
+            $log .= ", [IS_NOT_UPLOADER] || uploaderRatio == 1, upRatio: $upRatio";
         }
         /**
          * VIP do not calculate downloaded
@@ -995,8 +1085,14 @@ function clear_user_cache($uid, $passkey = '')
     \Nexus\Database\NexusDB::cache_del("user_{$uid}_roles");
     \Nexus\Database\NexusDB::cache_del("announce_user_passkey_$uid");//announce.php
     \Nexus\Database\NexusDB::cache_del(\App\Models\Setting::DIRECT_PERMISSION_CACHE_KEY_PREFIX . $uid);
+    \Nexus\Database\NexusDB::cache_del("user_role_ids:$uid");
+    \Nexus\Database\NexusDB::cache_del("direct_permissions:$uid");
     if ($passkey) {
         \Nexus\Database\NexusDB::cache_del('user_passkey_'.$passkey.'_content');//announce.php
+    }
+    $userInfo = \App\Models\User::query()->find($uid, \App\Models\User::$commonFields);
+    if ($userInfo) {
+        fire_event("user_updated", $userInfo);
     }
 }
 
@@ -1005,6 +1101,11 @@ function clear_setting_cache()
     do_log("clear_setting_cache");
     \Nexus\Database\NexusDB::cache_del('nexus_settings_in_laravel');
     \Nexus\Database\NexusDB::cache_del('nexus_settings_in_nexus');
+    \Nexus\Database\NexusDB::cache_del('setting_protected_forum');
+    $channel = nexus_env("CHANNEL_NAME_SETTING");
+    if (!empty($channel)) {
+        \Nexus\Database\NexusDB::redis()->publish($channel, "update");
+    }
 }
 
 /**
@@ -1070,8 +1171,12 @@ function clear_inbox_count_cache($uid)
 function clear_agent_allow_deny_cache()
 {
     do_log("clear_agent_allow_deny_cache");
-    \Nexus\Database\NexusDB::cache_del("all_agent_allows");
-    \Nexus\Database\NexusDB::cache_del("all_agent_denies");
+    $allowCacheKey = nexus_env("CACHE_KEY_AGENT_ALLOW", "all_agent_allows");
+    $denyCacheKey = nexus_env("CACHE_KEY_AGENT_DENY", "all_agent_denies");
+    foreach (["", ":php", ":go"] as $suffix) {
+        \Nexus\Database\NexusDB::cache_del($allowCacheKey . $suffix);
+        \Nexus\Database\NexusDB::cache_del($denyCacheKey . $suffix);
+    }
 }
 
 
@@ -1085,6 +1190,9 @@ function user_can($permission, $fail = false, $uid = 0): bool
         $log .= ", set current uid: $uid";
     }
     if ($uid <= 0) {
+        if ($fail) {
+            goto FAIL;
+        }
         do_log("$log, unauthenticated, false");
         return false;
     }
@@ -1111,6 +1219,7 @@ function user_can($permission, $fail = false, $uid = 0): bool
         $userCanCached[$permission][$uid] = $result;
         return $result;
     }
+    FAIL:
     do_log("$log, [FAIL]");
     if (IN_NEXUS && !IN_TRACKER) {
         global $lang_functions;
@@ -1124,12 +1233,15 @@ function user_can($permission, $fail = false, $uid = 0): bool
     throw new \App\Exceptions\InsufficientPermissionException();
 }
 
+
+
 function is_donor(array $userInfo): bool
 {
     return $userInfo['donor'] == 'yes' && ($userInfo['donoruntil'] === null || $userInfo['donoruntil'] == '0000-00-00 00:00:00' || $userInfo['donoruntil'] >= date('Y-m-d H:i:s'));
 }
 
 /**
+ * @deprecated
  * @param $authkey
  * @return false|int|mixed|string|null
  * @throws \App\Exceptions\NexusException
@@ -1169,15 +1281,88 @@ function executeCommand($command, $format = 'string', $artisan = false, $excepti
     do_log("command: $command");
     $result = exec($command, $output, $result_code);
     $outputString = implode("\n", $output);
-    do_log(sprintf('result_code: %s, result: %s, output: %s', $result_code, $result, $outputString));
-    if ($exception && $result_code != 0) {
-        throw new \RuntimeException($outputString);
+    $log = sprintf('result_code: %s, result: %s, output: %s', $result_code, $result, $outputString);
+    if ($result_code != 0) {
+        do_log($log, "error");
+        if ($exception) {
+            throw new \RuntimeException($outputString);
+        }
+    } else {
+        do_log($log);
     }
     return $format == 'string' ? $outputString : $output;
 }
 
 function has_role_work_seeding($uid)
 {
-    return apply_filter('user_has_role_work_seeding', false, $uid);
+    $result = apply_filter('user_has_role_work_seeding', false, $uid);
+    do_log("uid: $uid, result: $result");
+    return $result;
 }
 
+function is_danger_url($url): bool
+{
+    $dangerScriptsPattern = "/(logout|login|ajax|announce|scrape|adduser|modtask|take.*)\.php/i";
+    $match = preg_match($dangerScriptsPattern, $url);
+    if ($match > 0) {
+        return true;
+    }
+    return false;
+}
+
+function get_snatch_info($torrentId, $userId)
+{
+    return mysql_fetch_assoc(sql_query(sprintf('select * from snatched where torrentid = %s and userid = %s order by id desc limit 1', $torrentId, $userId)));
+}
+
+/**
+ * 完整的 Laravel 事件, 在 php 端有监听者的需要触发. 同样会执行 publish_model_event()
+ */
+function fire_event(string $name, \Illuminate\Database\Eloquent\Model $model, \Illuminate\Database\Eloquent\Model $oldModel = null): void
+{
+    $prefix = "fire_event:";
+    $idKey = $prefix . \Illuminate\Support\Str::random();
+    $idKeyOld = "";
+    \Nexus\Database\NexusDB::cache_put($idKey, serialize($model), 3600*24*30);
+    if ($oldModel) {
+        $idKeyOld = $prefix . \Illuminate\Support\Str::random();
+        \Nexus\Database\NexusDB::cache_put($idKeyOld, serialize($oldModel), 3600*24*30);
+    }
+    executeCommand("event:fire --name=$name --idKey=$idKey --idKeyOld=$idKeyOld", "string", true, false);
+}
+
+/**
+ * 仅仅是往 redis 发布事件, php 端无监听者仅在其他平台有需要的触发这个即可, 较轻量
+ */
+function publish_model_event(string $event, int $id): void
+{
+    $channel = nexus_env("CHANNEL_NAME_MODEL_EVENT");
+    if (!empty($channel)) {
+        \Nexus\Database\NexusDB::redis()->publish($channel, json_encode(["event" => $event, "id" => $id]));
+    } else {
+        do_log("event: $event, id: $id, channel: $channel, channel is empty!", "error");
+    }
+}
+
+function convertNamespaceToSnake(string $str): string
+{
+    return str_replace(["\\", "::"], ["_", "."], $str);
+}
+
+function get_user_locale(int $uid): string
+{
+    $sql = "select language.site_lang_folder from useers inner join language on users.lang = language.id where users.id = $uid limit 1";
+    $result = \Nexus\Database\NexusDB::select($sql);
+    if (empty($result) || empty($result[0]['site_lang_folder'])) {
+        return "en";
+    }
+    return \App\Http\Middleware\Locale::$languageMaps[$result[0]['site_lang_folder']] ?? 'en';
+}
+
+function send_admin_success_notification(string $msg = ""): void {
+    \Filament\Notifications\Notification::make()->success()->title($msg ?: "Success!")->send();
+}
+
+function send_admin_fail_notification(string $msg = ""): void {
+    \Filament\Notifications\Notification::make()->danger()->title($msg ?: "Fail!")->send();
+}

@@ -68,7 +68,7 @@ foreach ($period as $value) {
         if ($logValue->is_retroactive) {
             $events[] = array_merge($eventBase, ['title' => $lang_attendance['retroactive_event_text'], 'display' => 'list-item']);
         }
-    } elseif ($value->lte($today) && $value->diffInDays($today) <= \App\Models\Attendance::MAX_RETROACTIVE_DAYS) {
+    } elseif ($value->lte($today) && $value->diffInDays($today, true) <= \App\Models\Attendance::MAX_RETROACTIVE_DAYS) {
         $events[] = array_merge($eventBase, ['groupId' => 'to_do', 'display' => 'list-item']);
     }
 }
@@ -89,23 +89,19 @@ document.addEventListener('DOMContentLoaded', function() {
       eventClick: function(info) {
         console.log(info.event);
         if (info.event.groupId == 'to_do') {
-            retroactive(info.event.start)
+            retroactive(info.event.startStr)
         }
       }
     });
     calendar.render();
 });
 
-function retroactive(start) {
-    let year = start.getFullYear()
-    let month = start.getMonth() + 1
-    let day = start.getDate()
-    let date = year + '-' + month + '-' + day
-    if (!window.confirm(confirmText + date + ' ?')) {
+function retroactive(dateStr) {
+    if (!window.confirm(confirmText + dateStr + ' ?')) {
         console.log("cancel")
         return
     }
-    jQuery.post('ajax.php', {params: {timestamp: start.getTime()}, action: 'attendanceRetroactive'}, function (response) {
+    jQuery.post('ajax.php', {params: {date: dateStr}, action: 'attendanceRetroactive'}, function (response) {
         console.log(response);
         if (response.ret != 0) {
             alert(response.msg)

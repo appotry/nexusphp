@@ -45,7 +45,9 @@ function block_browser()
 
 function benc_resp($d)
 {
-    do_log(nexus_json_encode($d));
+    $logData = $d;
+    unset($logData['peers'], $logData['peers6']);
+    do_log(nexus_json_encode($logData));
     benc_resp_raw(\Rhilip\Bencode\Bencode::encode($d));
 }
 function benc_resp_raw($x) {
@@ -59,11 +61,60 @@ function benc_resp_raw($x) {
 	else
 		echo $x;
 }
-function err($msg, $userid = 0, $torrentid = 0)
+
+/**
+ * client will retry, keep the event param
+ * @param $msg
+ * @return void
+ */
+function err($msg)
 {
     benc_resp(['failure reason' => $msg]);
-	exit();
+    exit();
 }
+
+/**
+ * client will not retry, think about success with warning message
+ * @param $msg
+ * @param int $interval
+ * @return void|null
+ */
+function warn($msg, int $interval = 7200)
+{
+    if (!empty($GLOBALS['event']) && in_array($GLOBALS['event'], ["completed", "stopped"])) {
+        //force return err, otherwise event will be lost in the next announce request
+        return err($msg);
+    }
+    $d = get_resp_dict_from_global();
+    $d['warning message'] = $msg;
+    if ($interval > 0) {
+        $d['interval'] = intval($interval);
+        $d['min interval'] = intval($interval);
+    }
+    benc_resp($d);
+    exit();
+}
+
+function get_resp_dict_from_global() {
+    if (isset($GLOBALS['rep_dict'])) {
+        $d = $GLOBALS['rep_dict'];
+    } else {
+        $torrent = $GLOBALS['torrent'] ?? [];
+        $d = [
+            "interval" => (int)\App\Repositories\TrackerRepository::MIN_ANNOUNCE_WAIT_SECOND,
+            "min interval" => (int)\App\Repositories\TrackerRepository::MIN_ANNOUNCE_WAIT_SECOND,
+            "complete" => intval($torrent['seeders'] ?? 0),
+            "incomplete" => intval($torrent['leechers'] ?? 0),
+            "peers" => [],
+        ];
+        if (!empty($_REQUEST['compact'])) {
+            $d['peers'] = '';  // Change `peers` from array to string
+            $d['peers6'] = '';   // If peer use IPv6 address , we should add packed string in `peers6`
+        }
+    }
+    return $d;
+}
+
 function check_cheater($userid, $torrentid, $uploaded, $downloaded, $anctime, $seeders=0, $leechers=0){
 	global $cheaterdet_security,$nodetect_security, $CURUSER;
 
@@ -79,13 +130,13 @@ function check_cheater($userid, $torrentid, $uploaded, $downloaded, $anctime, $s
 		$comment = "User account was automatically disabled by system";
 		mysql_query("INSERT INTO cheaters (added, userid, torrentid, uploaded, downloaded, anctime, seeders, leechers, comment) VALUES (".sqlesc($time).", $userid, $torrentid, $uploaded, $downloaded, $anctime, $seeders, $leechers, ".sqlesc($comment).")") or err("Tracker error 51");
 		mysql_query("UPDATE users SET enabled = 'no' WHERE id=$userid") or err("Tracker error 50"); //automatically disable user account;
-		err("We believe you're trying to cheat. And your account is disabled.");
         $userBanLog = [
             'uid' => $userid,
             'username' => $CURUSER['username'],
             'reason' => "$comment(Upload speed:" . mksize($upspeed) . "/s)"
         ];
         \App\Models\UserBanLog::query()->insert($userBanLog);
+        err("We believe you're trying to cheat. And your account is disabled.");
 		return true;
 	}
 	if ($uploaded > 1073741824 && $upspeed > ($mayBeCheaterSpeed/$cheaterdet_security)) //Uploaded more than 1 GB with uploading rate higher than 25 MByte/S (For Consertive level). This is likely cheating.

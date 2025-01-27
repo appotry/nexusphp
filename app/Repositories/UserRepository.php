@@ -7,8 +7,10 @@ use App\Http\Resources\ExamUserResource;
 use App\Http\Resources\UserResource;
 use App\Models\ExamUser;
 use App\Models\Invite;
+use App\Models\LoginLog;
 use App\Models\Message;
 use App\Models\Setting;
+use App\Models\Snatch;
 use App\Models\User;
 use App\Models\UserBanLog;
 use App\Models\UserMeta;
@@ -16,8 +18,10 @@ use App\Models\UsernameChangeLog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Nexus\Database\NexusDB;
 
 class UserRepository extends BaseRepository
@@ -102,7 +106,18 @@ class UserRepository extends BaseRepository
         if (mb_strlen($password) < 6 || mb_strlen($password) > 40) {
             throw new \InvalidArgumentException("Invalid password: $password, it should be more than 6 character and less than 40 character");
         }
-        $class = !empty($params['class']) ? intval($params['class']) : User::CLASS_USER;
+        if (!empty($params['class'])) {
+            $class =intval($params['class']);
+            if (!IN_NEXUS) {
+                $authUser = Auth::user();
+                if ($authUser && $class >= $authUser->class) {
+                    throw new InsufficientPermissionException('No permission');
+                }
+            }
+        } else {
+            $class = User::CLASS_USER;
+        }
+
         if (!isset(User::$classes[$class])) {
             throw new \InvalidArgumentException("Invalid user class: $class");
         }
@@ -118,7 +133,8 @@ class UserRepository extends BaseRepository
             'stylesheet' => $setting['defstylesheet'],
             'added' => now()->toDateTimeString(),
             'status' => User::STATUS_CONFIRMED,
-            'class' => $class
+            'class' => $class,
+            'passkey' => md5($username.date("Y-m-d H:i:s").$passhash)
         ];
         $user = new User($data);
         if (!empty($params['id'])) {
@@ -129,7 +145,7 @@ class UserRepository extends BaseRepository
             $user->id = $params['id'];
         }
         $user->save();
-
+        fire_event("user_created", $user);
         return $user;
     }
 
@@ -186,6 +202,7 @@ class UserRepository extends BaseRepository
         });
         do_log("user: $uid, $modCommentText");
         $this->clearCache($targetUser);
+        fire_event("user_disabled", $targetUser);
         return true;
     }
 
@@ -212,6 +229,7 @@ class UserRepository extends BaseRepository
         $targetUser->updateWithModComment($update, $modCommentText);
         do_log("user: $uid, $modCommentText, update: " . nexus_json_encode($update));
         $this->clearCache($targetUser);
+        fire_event("user_enabled", $targetUser);
         return true;
     }
 
@@ -414,7 +432,7 @@ class UserRepository extends BaseRepository
             $changeLog = $user->usernameChangeLogs()->orderBy('id', 'desc')->first();
             if ($changeLog) {
                 $miniDays = Setting::get('system.change_username_min_interval_in_days', 365);
-                if ($changeLog->created_at->diffInDays() <= $miniDays) {
+                if (abs($changeLog->created_at->diffInDays()) <= $miniDays) {
                     $msg = nexus_trans('user.change_username_lte_min_interval', ['last_change_time' => $changeLog->created_at, 'interval' => $miniDays]);
                     throw new \RuntimeException($msg);
                 }
@@ -467,7 +485,7 @@ class UserRepository extends BaseRepository
         return true;
     }
 
-    public function changeClass($operator, $targetUser, $newClass, $reason = ''): bool
+    public function changeClass($operator, $targetUser, $newClass, $reason = '', array $extra = []): bool
     {
         user_can('user-change-class', true);
         $operator = $this->getUser($operator);
@@ -476,7 +494,7 @@ class UserRepository extends BaseRepository
             if ($operator->class <= $targetUser->class || $operator->class <= $newClass)
             throw new InsufficientPermissionException();
         }
-        if ($targetUser->class == $newClass) {
+        if ($targetUser->class == $newClass && $newClass != User::CLASS_VIP) {
             return  true;
         }
         $locale = $targetUser->locale;
@@ -494,11 +512,34 @@ class UserRepository extends BaseRepository
             'msg' => $body,
             'added' => Carbon::now(),
         ];
-
-        NexusDB::transaction(function () use ($targetUser, $newClass, $message) {
+        $userUpdates = [
+            'class' => $newClass,
+        ];
+        if ($newClass == User::CLASS_VIP) {
+            if (!empty($extra['vip_added']) && in_array($extra['vip_added'], ['yes', 'no'])) {
+                $userUpdates['vip_added'] = $extra['vip_added'];
+            } else {
+                $userUpdates['vip_added'] = 'no';
+            }
+            if (!empty($extra['vip_until'])) {
+                $until = Carbon::parse($extra['vip_until']);
+                $userUpdates['vip_until'] = $until;
+            } else {
+                $userUpdates['vip_until'] = null;
+            }
+        } else {
+            $userUpdates['vip_added'] = 'no';
+            $userUpdates['vip_until'] = null;
+        }
+        do_log("userUpdates: " . json_encode($userUpdates));
+        NexusDB::transaction(function () use ($targetUser, $userUpdates, $message) {
             $modComment = date('Y-m-d') . " - " . $message['msg'];
-            $targetUser->updateWithModComment(['class' => $newClass], $modComment);
-            Message::add($message);
+            if ($targetUser->class != $userUpdates['class']) {
+                $targetUser->updateWithModComment($userUpdates, $modComment);
+                Message::add($message);
+            } else {
+                $targetUser->update($userUpdates);
+            }
             $this->clearCache($targetUser);
         });
 
@@ -586,22 +627,37 @@ class UserRepository extends BaseRepository
         return true;
     }
 
-    public function destroy($id, $reasonKey = 'user.destroy_by_admin')
+    public function destroy(Collection|int $id, $reasonKey = 'user.destroy_by_admin')
     {
         if (!isRunningInConsole()) {
             user_can('user-delete', true);
         }
-        $uidArr = Arr::wrap($id);
-        $users = User::query()->with('language')->whereIn('id', $uidArr)->get(['id', 'username', 'lang']);
+        if (is_int($id)) {
+            $uidArr = Arr::wrap($id);
+        } else {
+            $uidArr = $id->pluck('id')->toArray();
+        }
+        $uidStr = implode(',', $uidArr);
+        $users = User::query()->with('language')->whereIn('id', $uidArr)->get();
+        if ($users->isEmpty()) {
+            return true;
+        }
         $tables = [
             'users' => 'id',
             'hit_and_runs' => 'uid',
             'claims' => 'uid',
             'exam_users' => 'uid',
             'exam_progress' => 'uid',
+            'user_metas' => 'uid',
+            'user_medals' => 'uid',
+            'attendance' => 'uid',
+            'attendance_logs' => 'uid',
+            'login_logs' => 'uid',
+            'oauth_access_tokens' => 'user_id',
+            'oauth_auth_codes' => 'user_id',
         ];
         foreach ($tables as $table => $key) {
-            \Nexus\Database\NexusDB::table($table)->whereIn($key, $uidArr)->delete();
+            NexusDB::statement(sprintf("delete from `%s` where `%s` in (%s)", $table, $key, $uidStr));
         }
         do_log("[DESTROY_USER]: " . json_encode($uidArr), 'error');
         $userBanLogs = [];
@@ -613,7 +669,12 @@ class UserRepository extends BaseRepository
             ];
         }
         UserBanLog::query()->insert($userBanLogs);
-        do_action("user_delete", $id);
+        //delete by user, make sure torrent is deleted
+        NexusDB::statement(sprintf('DELETE FROM snatched WHERE userid IN (%s) and not exists (select 1 from torrents where id = snatched.torrentid)', $uidStr));
+        if (is_int($id)) {
+            do_action("user_delete", $id);
+            fire_event("user_destroyed", $users->first());
+        }
         return true;
     }
 
@@ -696,6 +757,24 @@ class UserRepository extends BaseRepository
             throw new NexusException(nexus_trans('invite.send_deny_reasons.invite_not_enough'));
         }
         return nexus_trans('invite.send_allow_text');
+    }
+
+    public function saveLoginLog(int $uid, string $ip,  string $client = '', bool $notify = false)
+    {
+        $locationInfo = get_ip_location_from_geoip($ip);
+        $loginLog = LoginLog::query()->create([
+            'ip' => $ip,
+            'uid' => $uid,
+            'country' => $locationInfo['country_en'] ?? '',
+            'city' => $locationInfo['city_en'] ?? '',
+            'client' => $client,
+        ]);
+        if ($notify) {
+            $command = sprintf("user:login_notify --this_id=%s", $loginLog->id);
+            do_log("[LOGIN_NOTIFY], user: $uid, $command");
+            executeCommand($command, "string", true, false);
+        }
+        return $loginLog;
     }
 
 }

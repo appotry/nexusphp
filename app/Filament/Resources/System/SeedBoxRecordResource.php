@@ -10,9 +10,9 @@ use App\Models\SeedBoxRecord;
 use App\Repositories\SeedBoxRepository;
 use Filament\Facades\Filament;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
@@ -25,13 +25,13 @@ class SeedBoxRecordResource extends Resource
 
     protected static ?string $model = SeedBoxRecord::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-archive';
+    protected static ?string $navigationIcon = 'heroicon-o-archive-box';
 
     protected static ?string $navigationGroup = 'System';
 
     protected static ?int $navigationSort = 98;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.seed_box_records');
     }
@@ -47,6 +47,7 @@ class SeedBoxRecordResource extends Resource
             ->schema([
                 Forms\Components\TextInput::make('operator')->label(__('label.seed_box_record.operator')),
                 Forms\Components\TextInput::make('bandwidth')->label(__('label.seed_box_record.bandwidth'))->integer(),
+                Forms\Components\TextInput::make('asn')->label(__('label.seed_box_record.asn'))->integer(),
                 Forms\Components\TextInput::make('ip_begin')->label(__('label.seed_box_record.ip_begin')),
                 Forms\Components\TextInput::make('ip_end')->label(__('label.seed_box_record.ip_end')),
                 Forms\Components\TextInput::make('ip')->label(__('label.seed_box_record.ip'))->helperText(__('label.seed_box_record.ip_help')),
@@ -72,6 +73,7 @@ class SeedBoxRecordResource extends Resource
                 ,
                 Tables\Columns\TextColumn::make('operator')->label(__('label.seed_box_record.operator'))->searchable(),
                 Tables\Columns\TextColumn::make('bandwidth')->label(__('label.seed_box_record.bandwidth')),
+                Tables\Columns\TextColumn::make('asn')->label(__('label.seed_box_record.asn')),
                 Tables\Columns\TextColumn::make('ip')
                     ->label(__('label.seed_box_record.ip'))
                     ->searchable(true, function (Builder $query, $search) {
@@ -98,6 +100,16 @@ class SeedBoxRecordResource extends Resource
                     ->label(__('label.seed_box_record.status')),
             ])
             ->filters([
+                Tables\Filters\Filter::make('id')
+                    ->form([
+                        Forms\Components\TextInput::make('id')
+                            ->label('ID')
+                            ->placeholder('ID')
+                        ,
+                    ])->query(function (Builder $query, array $data) {
+                        return $query->when($data['id'], fn (Builder $query, $id) => $query->where("id", $id));
+                    })
+                ,
                 Tables\Filters\Filter::make('uid')
                     ->form([
                         Forms\Components\TextInput::make('uid')

@@ -4,27 +4,29 @@ namespace App\Filament\Resources\User;
 
 use App\Filament\Resources\User\UserMetaResource\Pages;
 use App\Filament\Resources\User\UserMetaResource\RelationManagers;
+use App\Models\NexusModel;
 use App\Models\UserMeta;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\HtmlString;
 
 class UserMetaResource extends Resource
 {
     protected static ?string $model = UserMeta::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-collection';
+    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
     protected static ?string $navigationGroup = 'User';
 
     protected static ?int $navigationSort = 8;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.user_props');
     }
@@ -81,10 +83,13 @@ class UserMetaResource extends Resource
                 ,
             ])
             ->actions([
-//                Tables\Actions\EditAction::make(),
+                Tables\Actions\DeleteAction::make()->using(function (NexusModel $record) {
+                    $record->delete();
+                    clear_user_cache($record->uid);
+                    do_log(sprintf("user: %d meta: %s was del by %s", $record->uid, $record->meta_key, Auth::user()->username));
+                }),
             ])
             ->bulkActions([
-//                Tables\Actions\DeleteBulkAction::make(),
             ]);
     }
 

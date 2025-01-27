@@ -260,7 +260,6 @@ class NexusDB
         $capsule->bootEloquent();
         $connection = self::$eloquentConnection = $capsule->getConnection($connectionName);
         $connection->enableQueryLog();
-        $connection->getDoctrineSchemaManager()->getDatabasePlatform()->registerDoctrineTypeMapping('enum', 'string');
     }
 
     private static function schema(): \Illuminate\Database\Schema\Builder
@@ -427,6 +426,17 @@ class NexusDB
         }
         return $results;
 
+    }
+
+    public static function hasIndex($table, $indexName): bool
+    {
+        $results = self::select("show index from $table");
+        foreach ($results as $item) {
+            if ($item['Key_name'] == $indexName) {
+                return true;
+            }
+        }
+        return false;
     }
 
 

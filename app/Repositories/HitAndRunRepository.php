@@ -215,7 +215,7 @@ class HitAndRunRepository extends BaseRepository
                 }
 
                 //unreached
-                if ($row->created_at->addHours($setting['inspect_time'])->lte(Carbon::now())) {
+                if ($row->created_at->addHours((int)$setting['inspect_time'])->lte(Carbon::now())) {
                     $result = $this->unreached($row, $setting, !isset($disabledUsers[$row->uid]));
                     if ($result) {
                         $successCounts++;
@@ -236,7 +236,7 @@ class HitAndRunRepository extends BaseRepository
             'added' => Carbon::now()->toDateTimeString(),
             'subject' => nexus_trans('hr.reached_message_subject', ['hit_and_run_id' => $hitAndRun->id], $hitAndRun->user->locale),
             'msg' => nexus_trans('hr.reached_message_content', [
-                'completed_at' => $hitAndRun->snatch->completedat->toDateTimeString(),
+                'completed_at' => format_datetime($hitAndRun->snatch->completedat),
                 'torrent_id' => $hitAndRun->torrent_id,
                 'torrent_name' => $hitAndRun->torrent->name,
             ], $hitAndRun->user->locale),
@@ -335,7 +335,7 @@ class HitAndRunRepository extends BaseRepository
             'added' => Carbon::now()->toDateTimeString(),
             'subject' => nexus_trans('hr.unreached_message_subject', ['hit_and_run_id' => $hitAndRun->id], $hitAndRun->user->locale),
             'msg' => nexus_trans('hr.unreached_message_content', [
-                'completed_at' => $hitAndRun->snatch->completedat->toDateTimeString(),
+                'completed_at' => format_datetime($hitAndRun->snatch->completedat),
                 'torrent_id' => $hitAndRun->torrent_id,
                 'torrent_name' => $hitAndRun->torrent->name,
             ], $hitAndRun->user->locale),
@@ -486,7 +486,7 @@ class HitAndRunRepository extends BaseRepository
 
     private function getCommentUpdateRaw($comment): \Illuminate\Database\Query\Expression
     {
-        return DB::raw(sprintf("if (comment = '', '%s', concat('\n', '%s', comment))", $comment, $comment));
+        return NexusDB::raw(sprintf("if (comment = '', '%s', concat('\n', '%s', comment))", $comment, $comment));
     }
 
     private function getCanPardonStatus(): array

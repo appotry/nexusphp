@@ -18,6 +18,10 @@ return [
         'subject' => '下載權限取消',
         'body' => '你因上傳速度過快下載權限被取消，若是盒子用戶請備案。',
     ],
+    'download_disable_announce_paid_torrent_too_many_times' => [
+        'subject' => '下载权限取消',
+        'body' => '你因向付費種子匯報失敗次數過多下載權限被取消，請確保你有足夠的魔力。',
+    ],
     'download_enable' => [
         'subject' => '下載權限恢復',
         'body' => '你的下載權限恢復，你現在可以下載種子。By: :operator',
@@ -33,9 +37,17 @@ return [
     'login_notify' => [
         'subject' => ':site_name 異地登錄提醒',
         'body' => <<<BODY
-你於 :this_login_time 進行了登錄操作，IP：:this_ip，位置：:this_location。
-上次登錄時間：:last_login_time，IP：:last_ip，位置：:last_location。
+你於：:this_login_time 進行了登錄操作，IP：:this_ip，位置：:this_location。<br/>
+上次登錄時間：:last_login_time，IP：:last_ip，位置：:last_location。<br/>
 若不是你本人操作，賬號密碼可能已經泄露，請及時修改！
 BODY,
-    ]
+    ],
+    'buy_torrent_success' => [
+        'subject' => '成功購買種子提醒',
+        'body' => '你花費 :bonus 魔力成功購買了種子：[url=:url]:torrent_name[/url]',
+    ],
+    'exam_user_end_time_updated' => [
+        'subject' => '考核 :exam_name 結束時間變更',
+        'body' => '你進行中的考核：:exam_name 的結束時間由 :old_end_time 變更為 :new_end_time。管理員：:operator，原因：:reason。',
+    ],
 ];

@@ -16,7 +16,7 @@ function bark($text = "")
 }
 if ($iv == "yes")
 	check_code ($_POST['imagehash'], $_POST['imagestring'],'login.php',true);
-$res = sql_query("SELECT id, passhash, secret, enabled, status, two_step_secret FROM users WHERE username = " . sqlesc($username));
+$res = sql_query("SELECT id, passhash, secret, enabled, status, two_step_secret, lang FROM users WHERE username = " . sqlesc($username));
 $row = mysql_fetch_array($res);
 
 if (!$row)
@@ -37,24 +37,10 @@ $log = "user: {$row['id']}, ip: $ip";
 if ($row["passhash"] != md5($row["secret"] . $password . $row["secret"])) {
     login_failedlogins();
 }
-$locationInfo = get_ip_location_from_geoip($ip);
-$thisLoginLog = \App\Models\LoginLog::query()->create([
-    'ip' => $ip,
-    'uid' => $row['id'],
-    'country' => $locationInfo['country_en'] ?? '',
-    'city' => $locationInfo['city_en'] ?? '',
-    'client' => 'Web',
-]);
-$lastLoginLog = \App\Models\LoginLog::query()->where('uid', $row['id'])->orderBy('id', 'desc')->first();
-if (
-    $lastLoginLog && $lastLoginLog->country && $lastLoginLog->city
-    && $locationInfo['country_en'] && $locationInfo['city_en']
-    && ($lastLoginLog->country != $locationInfo['country_en'] || $lastLoginLog->city != $locationInfo['city_en'])
-) {
-    $command = sprintf("user:login_notify --this_id=%s --last_id=%s", $thisLoginLog->id, $lastLoginLog->id);
-    do_log("[LOGIN_NOTIFY], user: {$row['id']}, $command");
-//    executeCommand($command, "string", true, false);
-}
+
+$userRep = new \App\Repositories\UserRepository();
+$userRep->saveLoginLog($row['id'], $ip, 'Web', true);
+
 if ($row["enabled"] == "no")
 	bark($lang_takelogin['std_account_disabled']);
 
@@ -97,6 +83,14 @@ else
 
 do_log($log);
 
+//update user lang
+$language = \App\Models\Language::query()->where("site_lang_folder", get_langfolder_cookie())->first();
+if ($language && $language->id != $row["lang"]) {
+    do_log(sprintf("update user: %s lang: %s => %s", $row["id"], $row["lang"], $language->id));
+    \App\Models\User::query()->where("id", $row["id"])->update(["lang" => $language->id]);
+    clear_user_cache($row["id"]);
+}
+
 if (isset($_POST["logout"]) && $_POST["logout"] == "yes")
 {
 	logincookie($row["id"], $passh,1,900,$securelogin_indentity_cookie, $ssl, $trackerssl);
@@ -109,7 +103,7 @@ else
 }
 
 if (!empty($_POST["returnto"]))
-	header("Location: " . $pprefix . "$BASEURL/{$_POST['returnto']}");
+	nexus_redirect($_POST['returnto']);
 else
-	header("Location: " . $pprefix . "$BASEURL/index.php");
+	nexus_redirect("index.php");
 ?>

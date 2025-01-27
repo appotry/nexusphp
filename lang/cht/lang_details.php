@@ -123,7 +123,7 @@ $lang_details = array
 	'text_hide_list' => "[隱藏清單]",
 	'row_action' => "行為",
 	'text_download_torrent' => "下載種子",
-	'text_download_paid_torrent' => "下載種子(扣除魔力：%s)",
+	'text_download_paid_torrent' => "下載種子(匯報時將扣除魔力：%s)",
     'text_download_bought_torrent' => "下載種子(已購買)",
 	'title_download_torrent' => "下載種子",
 	'text_ask_for_reseed' => "要求續種",
@@ -208,6 +208,7 @@ $lang_details = array
 	'text_creator' => "主創: ",
 	'submit_search_at_shooter' => "搜索射手網",
 	'submit_search_at_opensubtitles' => "搜索Opensubtitles",
+    'title_show_or_hide' => "顯示&nbsp;或&nbsp;隱藏",
 	'title_bookmark' => "收藏",
 	'text_album_information' => "專輯資訊：",
 	'text_about_album' => "關于該專輯：",
@@ -241,6 +242,7 @@ $lang_details = array
     'claim_confirm' => '確定要認領此種子嗎？',
     'action_approval' => '審核',
     'row_tags' => '標簽',
+    'torrent_existed' => '該種子已存在！',
 );
 
 ?>

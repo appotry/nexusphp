@@ -7,9 +7,9 @@ use App\Filament\Resources\System\AgentAllowResource\Pages;
 use App\Filament\Resources\System\AgentAllowResource\RelationManagers;
 use App\Models\AgentAllow;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
@@ -26,7 +26,7 @@ class AgentAllowResource extends Resource
 
     protected static ?int $navigationSort = 4;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.agent_allows');
     }
@@ -74,6 +74,11 @@ class AgentAllowResource extends Resource
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
+                Tables\Actions\DeleteAction::make()->using(function ($record) {
+                    $record->delete();
+                    clear_agent_allow_deny_cache();
+                    return redirect(self::getUrl());
+                })
             ])
             ->bulkActions([
                 Tables\Actions\DeleteBulkAction::make(),

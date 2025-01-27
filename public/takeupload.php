@@ -98,6 +98,13 @@ bark("eek");
 if (!filesize($tmpname))
 bark($lang_takeupload['std_empty_file']);
 
+//check max price
+$maxPrice = get_setting("torrent.max_price");
+$paidTorrentEnabled = get_setting("torrent.paid_torrent_enabled") == "yes";
+if ($maxPrice > 0 && $_POST['price'] > $maxPrice && $paidTorrentEnabled) {
+    bark('price too much');
+}
+
 try {
     $dict = \Rhilip\Bencode\Bencode::load($tmpname);
 } catch (\Rhilip\Bencode\ParseErrorException $e) {
@@ -172,9 +179,10 @@ unset ($dict['announce-list']); // remove multi-tracker capability
 unset ($dict['nodes']); // remove cached peers (Bitcomet & Azareus)
 
 $infohash = pack("H*", sha1(\Rhilip\Bencode\Bencode::encode($dict['info']))); // double up on the becoding solves the occassional misgenerated infohash
-
-if (\App\Models\Torrent::query()->where('info_hash', $infohash)->exists()) {
-    bark($lang_takeupload['std_torrent_existed']);
+$exists = \App\Models\Torrent::query()->where('info_hash', $infohash)->first(['id']);
+if ($exists) {
+//    bark($lang_takeupload['std_torrent_existed']);
+    nexus_redirect(sprintf("details.php?id=%d&existed=1", $exists['id']));
 }
 
 // ------------- start: check upload authority ------------------//
@@ -322,8 +330,8 @@ $insert = [
     'type' => $type,
     'url' => $url,
     'small_descr' => $small_descr,
-    'descr' => $descr,
-    'ori_descr' => $descr,
+//    'descr' => $descr,
+//    'ori_descr' => $descr,
     'category' => $catid,
     'source' => $sourceid,
     'medium' => $mediumid,
@@ -336,11 +344,22 @@ $insert = [
     'sp_state' => $sp_state,
     'added' => $dateTimeStringNow,
     'last_action' => $dateTimeStringNow,
-    'nfo' => $nfo,
+//    'nfo' => $nfo,
     'info_hash' => $infohash,
-    'pt_gen' => $_POST['pt_gen'] ?? '',
-    'technical_info' => $_POST['technical_info'] ?? '',
+//    'pt_gen' => $_POST['pt_gen'] ?? '',
+//    'technical_info' => $_POST['technical_info'] ?? '',
     'cover' => $cover,
+    'pieces_hash' => sha1($info['pieces']),
+    'cache_stamp' => time(),
+];
+/**
+ * migrate to extra table and remove pt_gen field
+ * @since 1.9
+ */
+$extra = [
+    'descr' => $descr,
+    'media_info' => $_POST['technical_info'] ?? '',
+    'nfo' => $nfo,
 ];
 if (isset($_POST['hr'][$catmod]) && isset(\App\Models\Torrent::$hrStatus[$_POST['hr'][$catmod]]) && user_can('torrent_hr')) {
     $insert['hr'] = $_POST['hr'][$catmod];
@@ -373,7 +392,7 @@ if(user_can('torrentmanage') && ($CURUSER['picker'] == 'yes' || get_user_class()
 if (user_can('torrent-approval-allow-automatic')) {
     $insert['approval_status'] = \App\Models\Torrent::APPROVAL_STATUS_ALLOW;
 }
-if (user_can('torrent-set-price')) {
+if (user_can('torrent-set-price') && $paidTorrentEnabled) {
     $insert['price'] = $_POST['price'] ?? 0;
 }
 do_log("[INSERT_TORRENT]: " . nexus_json_encode($insert));
@@ -395,6 +414,9 @@ if ($saveResult === false) {
     sql_query("delete from torrents where id = $id limit 1");
     bark("save torrent to $torrentFilePath fail.");
 }
+//remove announce info_hash not exists cache
+//@see announce.php
+\Nexus\Database\NexusDB::cache_del("torrent_not_exists:$infohash");
 
 /**
  * add custom fields
@@ -419,16 +441,26 @@ if (!empty($tagIdArr)) {
 foreach ($filelist as $file) {
 	@sql_query("INSERT INTO files (torrent, filename, size) VALUES ($id, ".sqlesc($file[0]).",".$file[1].")");
 }
+$extra['torrent_id'] = $id;
+\App\Models\TorrentExtra::query()->create($extra);
 
 //===add karma
 KPS("+",$uploadtorrent_bonus,$CURUSER["id"]);
 //===end
 
+$torrentRep = new \App\Repositories\TorrentRepository();
+$torrentRep->addPiecesHashCache($id, $insert['pieces_hash']);
 
 write_log("Torrent $id ($torrent) was uploaded by $anon");
 
 $searchRep = new \App\Repositories\SearchRepository();
 $searchRep->addTorrent($id);
+
+$meiliSearch = new \App\Repositories\MeiliSearchRepository();
+$meiliSearch->doImportFromDatabase($id);
+
+//trigger event
+fire_event("torrent_created", \App\Models\Torrent::query()->find($id));
 
 //===notify people who voted on offer thanks CoLdFuSiOn :)
 if ($is_offer)
@@ -472,7 +504,7 @@ $size = mksize($totallen);
 $description = format_comment($descr);
 
 //dirty code, change later
-
+$baseUrl = getSchemeAndHttpHost();
 $langfolder_array = array("en", "chs", "cht", "ko", "ja");
 $body_arr = array("en" => "", "chs" => "", "cht" => "", "ko" => "", "ja" => "");
 $i = 0;
@@ -493,8 +525,8 @@ $body_arr[$langfolder_array[$i]] = <<<EOD
 $description
 -------------------------------------------------------------------------------------------------------------------------
 
-{$lang_takeupload_target[$langfolder_array[$i]]['mail_torrent']}<b><a href="javascript:void(null)" onclick="window.open('http://$BASEURL/details.php?id=$id&hit=1')">{$lang_takeupload_target[$langfolder_array[$i]]['mail_here']}</a></b><br />
-http://$BASEURL/details.php?id=$id&hit=1
+{$lang_takeupload_target[$langfolder_array[$i]]['mail_torrent']}<b><a href="javascript:void(null)" onclick="window.open('$baseUrl/details.php?id=$id&hit=1')">{$lang_takeupload_target[$langfolder_array[$i]]['mail_here']}</a></b><br />
+$baseUrl/details.php?id=$id&hit=1
 
 ------{$lang_takeupload_target[$langfolder_array[$i]]['mail_yours']}
 {$lang_takeupload_target[$langfolder_array[$i]]['mail_team']}
@@ -509,7 +541,14 @@ while($arr = mysql_fetch_array($res))
 		$current_lang = $arr["lang"];
 		$to = $arr["email"];
 
-		sent_mail($to,$SITENAME,$SITEEMAIL,change_email_encode(validlang($current_lang),$lang_takeupload_target[validlang($current_lang)]['mail_title'].$torrent),change_email_encode(validlang($current_lang),$body_arr[validlang($current_lang)]),"torrent upload",false,false,'',get_email_encode(validlang($current_lang)), "eYou");
+		sent_mail(
+            $to,$SITENAME,$SITEEMAIL,
+            $lang_takeupload_target[validlang($current_lang)]['mail_title'],
+            $torrent,
+            validlang($current_lang),
+            $body_arr[validlang($current_lang)],
+            "torrent upload",false,false,'',
+        );
 }
 }
 

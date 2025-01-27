@@ -40,6 +40,7 @@ return [
     'city' => '城市',
     'client' => '客戶端',
     'reason' => '原因',
+    'change' => '修改',
     'setting' => [
         'nav_text' => '設置',
         'backup' => [
@@ -72,6 +73,8 @@ return [
             'ignore_when_ratio_reach_help' => '達標的最小分享率',
             'ban_user_when_counts_reach' => 'H&R 數量上限',
             'ban_user_when_counts_reach_help' => 'H&R 數量達到此值，賬號會被禁用',
+            'include_rate' => '計入完成率',
+            'include_rate_help' => '當下載完成率（0 ~ 1 之間的小數）達到此值時才計入 H&R。默認：1'
         ],
         'seed_box' => [
             'tab_header' => 'SeedBox',
@@ -85,14 +88,38 @@ return [
             'max_uploaded_duration' => '最大上傳量倍數有效時間範圍',
             'max_uploaded_duration_help' => '單位：小時。種子發布後的這個時間範圍內，最大上傳量倍數生效，超過此範圍不生效。設置為 0 一直生效',
         ],
+        'meilisearch' => [
+            'tab_header' => 'Meilisearch',
+            'enabled' => '是否啟用 Meilisearch',
+            'enabled_help' => '請先安裝配置好並導入數據再啟用，否則種子搜索無數據',
+            'search_description' => '是否搜索描述',
+            'search_description_help' => "默認：'否'。若為'是'，描述中包含關鍵字也會返回，命中的結果可能較多。修改後需立即重新導入",
+            'default_search_mode' => '默認搜索模式',
+            'default_search_mode_help' => "默認：'準確'。'與'將進行分詞，'準確'不分詞",
+        ],
         'system' => [
             'tab_header' => '系統',
             'change_username_card_allow_characters_outside_the_alphabets' => '改名卡是否允許英文字母外的字符',
             'change_username_min_interval_in_days' => '修改用戶名最小間隔天數',
             'maximum_number_of_medals_can_be_worn' => '勛章最大可佩戴數',
             'cookie_valid_days' => 'Cookie 有效天數',
-            'maximum_upload_speed_help' => '單種上傳速度超過此值賬號即刻禁用，單位 Mbps。如：100 Mbps = 12.5 MB/s',
+            'maximum_upload_speed' => '最大上傳速度',
+            'maximum_upload_speed_help' => '此值影響作弊者檢測，是檢測級別保守的最大上傳速度。實際限速 = 最大上傳速度/檢測級別，從保守~多疑為1~4。假如最大限速為 1000，檢測級別為保守，實際限速為 1000/1 = 1000，檢測級別為多疑，實際限速為 1000/4=250。單種上傳速度超過實際限速即刻禁用賬號。這裏的單位是 Mbps，如：100 Mbps = 12.5 MB/s。',
+            'is_invite_pre_email_and_username' => '邀請是否預定郵箱和用戶名',
+            'is_invite_pre_email_and_username_help' => "默認: 'No'。若預定，用戶註冊時不可修改郵箱和用戶名",
+            'access_admin_class_min' => '登錄管理後臺最小等級',
+            'access_admin_class_min_help' => '默認：管理員，用戶等級大於等於設定值的用戶可以登錄管理後臺',
+            'alarm_email_receiver' => '告警郵件接收者',
+            'alarm_email_receiver_help' => '填寫用戶 UID，多個空格隔開，系統異常告警郵件將會發到對應用戶的郵箱。如果不填會寫到運行日誌中，日誌級別為 error',
         ],
+        'image_hosting' => [
+            'driver' => '存儲位置',
+            'driver_help' => '若選擇 local, 對應默認的保存在網站所在服務器本地, 否則上傳到對應的圖片服務器',
+            'tab_header' => '圖床',
+            'upload_api_endpoint' => '上傳接口地址',
+            'base_url' => '圖片 URL 前綴',
+            'upload_token' => '上傳令牌',
+        ]
     ],
     'user' => [
         'label' => '用戶',
@@ -125,12 +152,16 @@ return [
         'label' => '用戶勛章',
     ],
     'exam' => [
-        'label' => '考核',
+        'label' => '考核 & 任務',
         'is_done' => '是否完成',
         'is_discovered' => '自動發現',
         'register_time_range' => [
             'begin' => '註冊時間開始',
             'end' => '註冊時間結束',
+        ],
+        'register_days_range' => [
+            'begin' => '註冊天數最少',
+            'end' => '註冊天數最多',
         ],
         'donated' => '是否捐贈',
         'index_formatted' => '考核指標',
@@ -179,6 +210,7 @@ return [
         'size_end' => '體積小於',
         'price' => '價格',
         'price_help' => '用戶下載種子時，發布者將獲得收入，但要扣除相應稅率，當前稅率：:tax_factor',
+        'max_price_help' => '允許最大值：:max_price',
     ],
     'hit_and_run' => [
         'label' => '用戶 H&R',
@@ -198,7 +230,7 @@ return [
         'label' => '允許客戶端',
         'family' => '系列',
         'start_name' => '起始名稱',
-        'peer_id_start' => 'Peer ID 超始',
+        'peer_id_start' => 'Peer ID 起始',
         'peer_id_pattern' => 'Peer ID 正則',
         'peer_id_matchtype' => 'Peer ID 匹配類型',
         'peer_id_match_num' => 'Peer ID 匹配次數',
@@ -211,7 +243,7 @@ return [
     ],
     'agent_deny' => [
         'label' => '拒絕客戶端',
-        'peer_id' => 'Peer ID 超始',
+        'peer_id' => 'Peer ID 起始',
         'agent' => 'Agent',
     ],
     'claim' => [
@@ -236,10 +268,11 @@ return [
         'ip' => 'IP(段)',
         'ip_begin' => '起始 IP',
         'ip_end' => '結束 IP',
-        'ip_help' => '填寫起始 IP + 結束 IP，或 IP(段)，不要同時填寫',
+        'ip_help' => '填寫ASN/起始 IP + 結束 IP/IP(段)，不要同時填寫',
         'status' => '狀態',
         'is_allowed' => '是否白名單',
         'is_allowed_help' => '位於白名單中的 IP 不受 SeedBox 規則影響',
+        'asn' => 'ASN',
     ],
     'menu' => [
         'label' => '自定義菜單',

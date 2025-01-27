@@ -13,22 +13,29 @@ if (!mkglobal("id:name:descr:type")){
 	global $lang_takeedit;
 	bark($lang_takeedit['std_missing_form_data']);
 }
+//check max price
+$maxPrice = get_setting("torrent.max_price");
+$paidTorrentEnabled = get_setting("torrent.paid_torrent_enabled") == "yes";
+if ($maxPrice > 0 && $_POST['price'] > $maxPrice && $paidTorrentEnabled) {
+    bark('price too much');
+}
 
 $id = intval($id ?? 0);
 if (!$id)
 	die();
 
 
-$res = sql_query("SELECT id, category, owner, filename, save_as, anonymous, picktype, picktime, added, pt_gen, banned FROM torrents WHERE id = ".mysql_real_escape_string($id));
+$res = sql_query("SELECT id, category, owner, filename, save_as, anonymous, picktype, picktime, added, banned FROM torrents WHERE id = ".mysql_real_escape_string($id));
 $row = mysql_fetch_array($res);
 $torrentAddedTimeString = $row['added'];
 if (!$row)
 	die();
-
+$torrentOld = \App\Models\Torrent::query()->find($id);
 if ($CURUSER["id"] != $row["owner"] && !user_can('torrentmanage'))
 	bark($lang_takeedit['std_not_owner']);
 $oldcatmode = get_single_value("categories","mode","WHERE id=".sqlesc($row['category']));
 $updateset = array();
+$extraUpdate = [];
 
 //$fname = $row["filename"];
 //preg_match('/^(.+)\.torrent$/si', $fname, $matches);
@@ -39,19 +46,23 @@ $url = parse_imdb_id($_POST['url'] ?? '');
 /**
  * add PT-Gen
  * @since 1.6
+ *
+ * @deprecated
+ * @since 1.9
  */
-if (!empty($_POST['pt_gen'])) {
-    $postPtGen = $_POST['pt_gen'];
-    $existsPtGenInfo = json_decode($row['pt_gen'], true) ?? [];
-    $ptGen = new \Nexus\PTGen\PTGen();
-    if ($postPtGen != $ptGen->getLink($existsPtGenInfo)) {
-        $updateset[] = "pt_gen = " . sqlesc($postPtGen);
-    }
-} else {
-    $updateset[] = "pt_gen = ''";
-}
+//if (!empty($_POST['pt_gen'])) {
+//    $postPtGen = $_POST['pt_gen'];
+//    $existsPtGenInfo = json_decode($row['pt_gen'], true) ?? [];
+//    $ptGen = new \Nexus\PTGen\PTGen();
+//    if ($postPtGen != $ptGen->getLink($existsPtGenInfo)) {
+//        $updateset[] = "pt_gen = " . sqlesc($postPtGen);
+//    }
+//} else {
+//    $updateset[] = "pt_gen = ''";
+//}
 
-$updateset[] = "technical_info = " . sqlesc($_POST['technical_info'] ?? '');
+//$updateset[] = "technical_info = " . sqlesc($_POST['technical_info'] ?? '');
+$extraUpdate["media_info"] = $_POST['technical_info'] ?? '';
 $torrentOperationLog = [];
 
 
@@ -64,8 +75,11 @@ if ($nfoaction == "update")
 	if ($nfofile['size'] > 65535)
 		bark($lang_takeedit['std_nfo_too_big']);
 	$nfofilename = $nfofile['tmp_name'];
-	if (@is_uploaded_file($nfofilename) && @filesize($nfofilename) > 0)
-		$updateset[] = "nfo = " . sqlesc(str_replace("\x0d\x0d\x0a", "\x0d\x0a", file_get_contents($nfofilename)));
+	if (@is_uploaded_file($nfofilename) && @filesize($nfofilename) > 0) {
+//        $updateset[] = "nfo = " . sqlesc(str_replace("\x0d\x0d\x0a", "\x0d\x0a", file_get_contents($nfofilename)));
+        $extraUpdate["nfo"] = str_replace("\x0d\x0d\x0a", "\x0d\x0a", file_get_contents($nfofilename));
+    }
+
 	$Cache->delete_value('nfo_block_torrent_id_'.$id);
 }
 elseif ($nfoaction == "remove"){
@@ -87,7 +101,8 @@ if ($oldcatmode != $newcatmode && !$allowmove)
 	bark($lang_takeedit['std_cannot_move_torrent']);
 $updateset[] = "anonymous = '" . (!empty($_POST["anonymous"]) ? "yes" : "no") . "'";
 $updateset[] = "name = " . sqlesc($name);
-$updateset[] = "descr = " . sqlesc($descr);
+//$updateset[] = "descr = " . sqlesc($descr);
+$extraUpdate["descr"] = $descr;
 $updateset[] = "url = " . sqlesc($url);
 $updateset[] = "small_descr = " . sqlesc($_POST["small_descr"]);
 //$updateset[] = "ori_descr = " . sqlesc($descr);
@@ -219,14 +234,16 @@ if (isset($_POST['hr'][$newcatmode]) && isset(\App\Models\Torrent::$hrStatus[$_P
  * price
  * @since 1.8.0
  */
-if (user_can('torrent-set-price')) {
+if (user_can('torrent-set-price') && $paidTorrentEnabled) {
     $updateset[] = "price = " . sqlesc($_POST['price'] ?? 0);
 }
 
 $sql = "UPDATE torrents SET " . join(",", $updateset) . " WHERE id = $id";
 do_log("[UPDATE_TORRENT]: $sql");
 $affectedRows = sql_query($sql) or sqlerr(__FILE__, __LINE__);
-
+$torrentInfo = \App\Models\Torrent::query()->find($id);
+$torrentInfo->extra()->updateOrCreate(['torrent_id' => $id], $extraUpdate);
+fire_event("torrent_updated", $torrentInfo, $torrentOld);
 $dateTimeStringNow = date("Y-m-d H:i:s");
 
 /**
@@ -285,7 +302,8 @@ if ($affectedRows == 1) {
             'comment' => '',
         ], true);
     }
-
+    $meiliSearch = new \App\Repositories\MeiliSearchRepository();
+    $meiliSearch->doImportFromDatabase($row['id']);
 }
 
 $returl = "details.php?id=$id&edited=1";

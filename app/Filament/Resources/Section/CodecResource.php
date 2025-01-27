@@ -8,9 +8,9 @@ use App\Models\Codec;
 use App\Models\Icon;
 use App\Models\SearchBox;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
@@ -32,8 +32,8 @@ class CodecResource extends Resource
                 Forms\Components\TextInput::make('name')->required()->label(__('label.search_box.taxonomy.name'))->required(),
                 Forms\Components\TextInput::make('sort_index')
                     ->default(0)
-                    ->label(__('label.search_box.taxonomy.sort_index'))
-                    ->helperText(__('label.search_box.taxonomy.sort_index_help'))
+                    ->label(__('label.priority'))
+                    ->helperText(__('label.priority_help'))
                 ,
                 Forms\Components\Select::make('mode')
                     ->options(SearchBox::query()->pluck('name', 'id')->toArray())
@@ -55,7 +55,7 @@ class CodecResource extends Resource
                 Tables\Columns\TextColumn::make('name')->label(__('label.search_box.taxonomy.name'))->searchable(),
                 Tables\Columns\TextColumn::make('sort_index')->label(__('label.search_box.taxonomy.sort_index'))->sortable(),
             ])
-            ->defaultSort('sort_index', 'asc')
+            ->defaultSort('sort_index', 'desc')
             ->filters([
                 Tables\Filters\SelectFilter::make('mode')
                     ->options(SearchBox::query()->pluck('name', 'id')->toArray())

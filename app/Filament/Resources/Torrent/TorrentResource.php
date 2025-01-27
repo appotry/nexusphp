@@ -16,9 +16,10 @@ use App\Repositories\TagRepository;
 use App\Repositories\TorrentRepository;
 use Filament\Facades\Filament;
 use Filament\Forms;
-use Filament\Resources\Form;
+use Filament\Pages\Actions\Action;
+use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Resources\Table;
+use Filament\Tables\Table;
 use Filament\Tables;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -36,7 +37,7 @@ class TorrentResource extends Resource
 
     protected static ?string $model = Torrent::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-collection';
+    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
     protected static ?string $navigationGroup = 'Torrent';
 
@@ -44,7 +45,7 @@ class TorrentResource extends Resource
 
     private static ?TorrentRepository $rep;
 
-    protected static function getNavigationLabel(): string
+    public static function getNavigationLabel(): string
     {
         return __('admin.sidebar.torrent_list');
     }
@@ -79,7 +80,9 @@ class TorrentResource extends Resource
                 Tables\Columns\TextColumn::make('basic_category.name')->label(__('label.torrent.category')),
                 Tables\Columns\TextColumn::make('name')->formatStateUsing(fn ($record) => torrent_name_for_admin($record, true))
                     ->label(__('label.name'))
-                    ->searchable(),
+                    ->searchable(query: function (Builder $query, string $search) {
+                        return $query->where("name", "like", "%{$search}%")->orWhere("small_descr", "like", "%{$search}%");
+                    }),
                 Tables\Columns\TextColumn::make('posStateText')->label(__('label.torrent.pos_state')),
                 Tables\Columns\TextColumn::make('spStateText')->label(__('label.torrent.sp_state')),
                 Tables\Columns\TextColumn::make('pickInfoText')
@@ -111,7 +114,8 @@ class TorrentResource extends Resource
             ->defaultSort('id', 'desc')
             ->filters(self::getFilters())
             ->actions(self::getActions())
-            ->bulkActions(self::getBulkActions());
+            ->bulkActions(self::getBulkActions())
+        ;
 
     }
 
@@ -153,7 +157,7 @@ class TorrentResource extends Resource
                         ->label(__('label.deadline'))
                     ,
                 ])
-                ->icon('heroicon-o-arrow-circle-up')
+                ->icon('heroicon-o-arrow-up-circle')
                 ->action(function (Collection $records, array $data) {
                     $idArr = $records->pluck('id')->toArray();
                     try {
@@ -185,7 +189,7 @@ class TorrentResource extends Resource
                         ->label(__('label.deadline'))
                     ,
                 ])
-                ->icon('heroicon-o-speakerphone')
+                ->icon('heroicon-o-megaphone')
                 ->action(function (Collection $records, array $data) {
                     $idArr = $records->pluck('id')->toArray();
                     try {
@@ -283,7 +287,7 @@ class TorrentResource extends Resource
                 ])
                 ->icon('heroicon-o-sparkles')
                 ->action(function (Collection $records, array $data) {
-                    if (empty($data['hr'])) {
+                    if (!isset($data['hr'])) {
                         return;
                     }
                     $idArr = $records->pluck('id')->toArray();
@@ -337,6 +341,13 @@ class TorrentResource extends Resource
             $actions[] = Tables\Actions\DeleteAction::make('delete')->using(function ($record) {
                 deletetorrent($record->id);
             });
+//            $actions[] = Tables\Actions\Action::make('view')
+//                ->action(function (Torrent $record) {
+//                    return [
+//                        'modelContent' => new HtmlString("ssss")
+//                    ];
+//                })
+//            ;
         }
         return $actions;
     }

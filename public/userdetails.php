@@ -30,7 +30,7 @@ $userRep = new \App\Repositories\UserRepository();
 if ($user['added'] == "0000-00-00 00:00:00" || $user['added'] == null) {
     $joindate = $lang_userdetails['text_not_available'];
 } else {
-    $weeks = $userInfo->added->diffInWeeks() . nexus_trans('nexus.time_units.week');
+    $weeks = abs($userInfo->added->diffInWeeks()) . nexus_trans('nexus.time_units.week');
     $joindate = $user['added']." (" . gettime($user["added"], true, false, true).", $weeks)";
 }
 $lastseen = $user["last_access"];
@@ -120,7 +120,7 @@ if ($CURUSER['id'] == $user['id'] || user_can('cruprfmanage'))
 <table width="100%" border="1" cellspacing="0" cellpadding="5">
 <?php
 $userIdDisplay = $user['id'];
-$userManageSystemUrl = sprintf('%s/%s/users/%s',getSchemeAndHttpHost(), nexus_env('FILAMENT_PATH', 'nexusphp'), $user['id']);
+$userManageSystemUrl = sprintf('%s/%s/user/users/%s',getSchemeAndHttpHost(), nexus_env('FILAMENT_PATH', 'nexusphp'), $user['id']);
 $userManageSystemText = sprintf('<a href="%s" target="_blank" class="altlink">%s</a>', $userManageSystemUrl, $lang_functions['text_management_system']);
 $migratedHelp = sprintf($lang_userdetails['change_field_value_migrated'], $userManageSystemText);
 if (user_can('prfmanage') && $user["class"] < get_user_class()) {
@@ -238,7 +238,7 @@ if (user_can('userprofile') ||  $user["id"] == $CURUSER["id"])
 	tr_small($lang_userdetails['row_ip_address'], $user['ip'].$locationinfo.$seedBoxIcon, 1);
 }
 $clientselect = '';
-$res = sql_query("SELECT peer_id, agent, ipv4, ipv6, port FROM peers WHERE userid = {$user['id']} GROUP BY agent") or sqlerr();
+$res = sql_query("SELECT peer_id, agent, ipv4, ipv6, port FROM peers WHERE userid = {$user['id']} GROUP BY agent, ipv4, ipv6, port") or sqlerr();
 if (mysql_num_rows($res) > 0)
 {
     $clientselect .= "<table border='1' cellspacing='0' cellpadding='5'><tr><td class='colhead'>Agent</td><td class='colhead'>IPV4</td><td class='colhead'>IPV6</td><td class='colhead'>Port</td></tr>";
@@ -496,9 +496,22 @@ if (user_can('prfmanage') && $user["class"] < get_user_class())
 
 	if (user_can('cruprfmanage'))
 	{
-		$modcomment = htmlspecialchars($user["modcomment"]);
+        $modcomment = \App\Models\UserModifyLog::query()
+            ->where("user_id", $user["id"])
+            ->orderBy("id", "desc")
+            ->limit(20)
+            ->get()
+            ->implode("content", "\n")
+        ;
 		tr($lang_userdetails['row_comment'], "<textarea cols=\"60\" rows=\"6\" name=\"modcomment\">".$modcomment."</textarea>", 1);
-		$bonuscomment = htmlspecialchars($user["bonuscomment"]);
+        $bonuscomment = \App\Models\BonusLogs::query()
+            ->where("uid", $user["id"])
+            ->orderBy("id", "desc")
+            ->limit(20)
+            ->get()
+            ->map(fn ($item) => sprintf("%s - %s", $item->created_at->format("Y-m-d"), $item->comment))
+            ->implode("\n")
+        ;
 		tr($lang_userdetails['row_seeding_karma'], "<textarea cols=\"60\" rows=\"6\" name=\"bonuscomment\" readonly=\"readonly\">".$bonuscomment."</textarea>", 1);
 	}
 	$warned = $user["warned"] == "yes";
@@ -633,7 +646,7 @@ if ($userInfo->id == $CURUSER['id'] && has_role_work_seeding($userInfo->id)) {
     $claimJs = <<<JS
 jQuery("body").on("click", "#claim-all-seeding", function (e) {
     layer.confirm("$claimAllSeedingConfirmation", {}, function () {
-        jQuery.post('ajax.php', {"action": "claimAllSeeding"}, function (response) {
+        jQuery.post('/plugin/claim_all_seeding', {"action": "claimAllSeeding"}, function (response) {
             if (response.ret == 0) {
                 window.location.reload()
             } else {

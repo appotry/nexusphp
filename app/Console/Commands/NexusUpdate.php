@@ -137,6 +137,12 @@ class NexusUpdate extends Command
             $this->doLog("Error: Redis version: {$mysqlInfo['version']} is too low, please use 2.0.0 or above.", 'error');
             return 0;
         }
+        if ($includeComposer) {
+            $this->doLog("going to update .env file ...");
+            $this->update->updateEnvFile();
+            $this->doLog("update .env file done!");
+        }
+
         $this->doLog("going to createSymbolicLinks...");
         $this->update->createSymbolicLinks($symbolicLinks);
         $this->doLog("createSymbolicLinks done!");
@@ -156,11 +162,6 @@ class NexusUpdate extends Command
         $this->doLog("going to runExtraMigrate...");
         $this->update->runExtraMigrate();
         $this->doLog("runExtraMigrate done!");
-
-        $logFile = getLogFile();
-        $command = "chmod 777 $logFile";
-        $this->doLog("$command...");
-        executeCommand($command);
 
         $this->doLog("All done!");
 
